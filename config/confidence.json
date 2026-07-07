@@ -1,0 +1,38 @@
+{
+  "version": "confidence_v2_hadley_audit",
+  "baseline_encoder": {
+    "model": "nomic-embed-text-v1.5",
+    "prompt_version": "emb_baseline_v1",
+    "dim": 768
+  },
+  "pairs": {
+    "_comment": "Retuned after Dr. Hadley routing audit (42% agreement on v1). Median pair cosine is ~0.89 so band widened to [0.55, 0.92]. structural_mode=differs_only because reviewers accepted cue-less paraphrases (preservation_pct=0) that still preserved meaning.",
+    "cosine_band_min": 0.55,
+    "cosine_band_max": 0.92,
+    "cosine_band_falloff": 0.35,
+    "structural_mode": "differs_only"
+  },
+  "negatives": {
+    "_comment": "Hard negatives: wider band so seed-word rows without anchor cosine (neutral 0.5) are not over-penalized. Rows with llm_gate_score=0 still land in review via low confidence.",
+    "cosine_band_min": 0.25,
+    "cosine_band_max": 0.90,
+    "cosine_band_falloff": 0.35
+  },
+  "weights": {
+    "_comment": "LLM self-score saturated on Y1; downweighted further after audit. Cosine and structural carry more of the routing decision.",
+    "llm": 0.5,
+    "cosine": 0.8,
+    "structural": 0.8
+  },
+  "routing": {
+    "_comment": "Retuned to match human leniency: auto_min 0.70 / spot_min 0.15 achieved 82% agreement on the 50-row Hadley audit while keeping llm_gate=0 rows (conf~0.13) in review.",
+    "auto_min": 0.70,
+    "spot_min": 0.15
+  },
+  "audit": {
+    "_comment": "Settings for the human routing audit sample (Step 5 DoD #3).",
+    "n_rows": 50,
+    "seed": 42,
+    "agreement_target": 0.80
+  }
+}

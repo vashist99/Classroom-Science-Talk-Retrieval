@@ -1,0 +1,11 @@
+flowchart LR
+    A["1. Capture<br/>LENA + BLE beacons"] --> B["2. ASR<br/>Whisper-large-v3"]
+    B --> C["3. Normalization<br/>segment, align, diarize, clean"]
+    C --> D["4. Science-talk detector<br/>bi-encoder + LLM gate"]
+    D --> E[("Output table:<br/>timestamp · speaker ·<br/>utterance · subtype · confidence")]
+    T[("Training corpus<br/>seed + paraphrases + hard negatives")] -.-> D
+
+    classDef stage fill:#E8F1FB,stroke:#2E5C8A,stroke-width:1.5px,color:#1A2B3C;
+    classDef store fill:#FFF4E0,stroke:#B8862A,stroke-width:1.5px,color:#3C2E1A;
+    class A,B,C,D stage;
+    class E,T store;
