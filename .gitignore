@@ -37,3 +37,8 @@ Thumbs.db
 
 # --- Keep the architecture diagram (png) tracked ---
 !architecture_diagram.png
+
+# --- Excluded per request: notebooks + sensitive internal docs ---
+notebooks/
+DOCUMENTATION.md
+FUNCTION_REFERENCE.md
