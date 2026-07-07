@@ -1,0 +1,33 @@
+{
+  "version": "eval_v1",
+  "_comment": "Step 11 evaluation + threshold tuning config.",
+  "query_config": "config/query.json",
+  "biencoder_config": "config/biencoder.json",
+  "ndcg_k": 10,
+  "threshold_grid": {"start": 0.05, "stop": 0.96, "step": 0.05},
+  "hard_informal_recall_floor": 0.80,
+  "_comment_floor": "Tune the threshold to max F1 on dev SUBJECT TO hard-informal-slice recall >= this floor, so we never tune away the informal-science cases we care about.",
+  "seed": 42,
+  "smoke": {
+    "_comment": "Cosine ablations (a,b) always run on FULL data (free, local). These sizes cap only the rerank system (c) and the common apples-to-apples ablation subsample.",
+    "n_pos_dev": 10,
+    "n_neg_dev": 10,
+    "n_pos_test": 10,
+    "n_neg_test": 10,
+    "n_slice": 15,
+    "max_new_calls": 1300
+  },
+  "full": {
+    "n_pos_dev": 63,
+    "n_neg_dev": 63,
+    "n_pos_test": 65,
+    "n_neg_test": 65,
+    "n_slice": 166,
+    "max_new_calls": 20000
+  },
+  "output": {
+    "report_md": "reports/eval_report.md",
+    "metrics_json": "reports/eval_metrics.json",
+    "predictions": "reports/test_predictions.parquet"
+  }
+}

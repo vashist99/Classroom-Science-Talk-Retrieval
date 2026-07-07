@@ -1,0 +1,29 @@
+{
+  "version": "biencoder_v1",
+  "base_model": "nomic-ai/nomic-embed-text-v1.5",
+  "_comment_base": "Local sentence-transformers checkpoint warm-started for fine-tuning. Downloaded once from HuggingFace, then saved to output_dir for offline loading (DoD #3).",
+  "query_prefix": "search_query: ",
+  "document_prefix": "search_document: ",
+  "_comment_prefix": "nomic-embed-text-v1.5 is trained with task prefixes. Anchors/corpus are documents; held-out variants used as retrieval queries get the query prefix.",
+  "train": {
+    "epochs": 3,
+    "batch_size": 16,
+    "learning_rate": 2e-5,
+    "warmup_ratio": 0.1,
+    "max_seq_length": 128,
+    "seed": 17,
+    "use_amp": false
+  },
+  "eval": {
+    "_comment": "Primary DoD gate = distractor MRR/recall@10 (F1-aligned: negatives act as distractors in the retrieval corpus). anchor_bank metrics are a register-invariance diagnostic.",
+    "k_values": [1, 5, 10],
+    "primary_metric": "mrr@10",
+    "require_strict_improvement": true
+  },
+  "output": {
+    "model_dir": "models/biencoder",
+    "corpus_embeddings": "data/processed/corpus_embeddings.npy",
+    "corpus_embeddings_meta": "data/processed/corpus_embeddings_meta.parquet",
+    "report": "reports/biencoder_eval.json"
+  }
+}

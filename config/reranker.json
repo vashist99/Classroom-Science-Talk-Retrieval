@@ -1,0 +1,49 @@
+{
+  "version": "reranker_v1",
+  "model_env": "LLM_MODEL_TRACKB",
+  "_comment_model": "gpt-oss-120b on UF HiPerGator, named in .env as LLM_MODEL_TRACKB.",
+  "prompt_version": "reranker_v1",
+  "prompt_file": "prompts/reranker_v1.txt",
+  "prompt_file_paraphrase": "prompts/reranker_v1b.txt",
+  "temperature": 0.0,
+  "max_tokens": 800,
+  "_comment_max_tokens": "gpt-oss-120b is a reasoning model: it emits reasoning_content before the answer, so the budget must cover reasoning + the JSON. Too low (e.g. 200) truncates before `content` and returns empty.",
+  "max_retries": 3,
+  "_comment_max_retries": "The endpoint intermittently returns an empty completion (fast transient blip). make_real_caller purges the poisoned cache entry on empty content so each retry re-hits the network; 3 retries rides out consecutive blips.",
+  "gate": {
+    "_comment": "Hard PASS/FAIL gate for Step 9 (dev is near-ceiling so retrieval lift is a diagnostic, not a gate, until Y2). min_auroc = score-sanity DoD; min_spearman = prompt-stability DoD.",
+    "min_auroc": 0.85,
+    "min_spearman": 0.90
+  },
+  "diagnostics": {
+    "_comment": "Computed and reported but not gated yet; hard_informal_min_lift is the 'X' from the plan, promoted to a gate once Y2 distractors exist.",
+    "hard_informal_min_lift": 0.0,
+    "retrieval_lift_metrics": ["precision@1", "mrr@10", "ndcg@10"]
+  },
+  "audit": {
+    "n_pairs": 100,
+    "seed": 42
+  },
+  "stability": {
+    "n_pairs": 50,
+    "seed": 42
+  },
+  "smoke": {
+    "_comment": "Capped budget for a fast proof-of-correctness run. rerank_sample=0 skips the expensive top-20 dev re-rank.",
+    "audit_pairs": 100,
+    "stability_pairs": 50,
+    "rerank_sample": 0,
+    "max_new_calls": 400
+  },
+  "full": {
+    "audit_pairs": 100,
+    "stability_pairs": 80,
+    "rerank_sample": 63,
+    "top_k": 20,
+    "max_new_calls": 5000
+  },
+  "output": {
+    "report_json": "reports/reranker_eval.json",
+    "calibration_md": "reports/reranker_calibration.md"
+  }
+}

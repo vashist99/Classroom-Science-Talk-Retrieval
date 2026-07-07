@@ -1,0 +1,24 @@
+# Science-talk retrieval pipeline — Python dependencies.
+# Pinned to the versions validated in this environment (Python 3.12).
+
+# Core data / numerics
+pandas==2.3.1
+numpy==1.26.4
+pyarrow>=14.0          # parquet engine
+openpyxl>=3.1          # xlsx read/write for review sheets
+
+# LLM client + config
+requests>=2.31
+python-dotenv>=1.0
+
+# Step 8 — bi-encoder fine-tuning (Track A)
+torch==2.5.1
+transformers==4.49.0
+sentence-transformers>=3.0
+einops>=0.8            # required by nomic-embed-text-v1.5 remote code
+wrapt>=1.16           # transitive (transformers.modeling_utils); missing on some envs
+datasets>=2.19,<3     # newer datasets needs py_extension_type removed in pyarrow 21
+scikit-learn>=1.5      # metrics / helpers
+
+# Testing
+pytest>=8.0

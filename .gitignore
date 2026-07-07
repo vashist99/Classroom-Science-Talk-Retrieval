@@ -1,0 +1,39 @@
+# --- Secrets ---
+.env
+.env.*
+*.key
+*.pem
+
+# --- Data (do not commit) ---
+data/
+
+# --- Generated outputs / reports ---
+reports/
+
+# --- Models, checkpoints, caches ---
+models/
+checkpoints/
+cache/
+*.npy
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Large reference binaries (not code) ---
+*.pdf
+*.pptx
+*.docx
+
+# --- Keep the architecture diagram (png) tracked ---
+!architecture_diagram.png

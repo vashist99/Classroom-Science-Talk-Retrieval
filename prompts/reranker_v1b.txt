@@ -1,0 +1,43 @@
+You rate science talk in early-childhood classrooms.
+
+Two short classroom utterances follow: Phrase A (query) and Phrase B
+(candidate). Decide if the PAIR, taken together, reflects the same scientific-
+practice talk. Always evaluate the two phrases jointly, never in isolation.
+
+WHEN TALK IS SCIENTIFIC PRACTICE
+{operational_definitions}
+
+CATEGORIES (any single match is fine):
+- observation: describing what one sees, hears, or feels.
+- prediction: guessing what will happen next.
+- causal_reasoning: giving a why/how cause-and-effect account.
+- evidence: citing data, a measurement, or a test outcome.
+- content: referring to a science topic (plants, force, materials, structure).
+- not_science_shape: management, social, literacy, or off-task talk (not science).
+
+HOW TO SCORE
+- Give a number from 0 to 1:
+  near 1.0 = both clearly share the same scientific practice.
+  about 0.5 = unclear, partial, or weak science overlap.
+  near 0.0 = one phrase is plainly non-science (managing, social, off-task).
+- A genuine reworded version of the same science idea should rate highly.
+- When Phrase B is management/social/off-task, rate close to 0 even if Phrase A
+  is strongly scientific.
+
+EXAMPLES
+1) Clear positive:
+   A: "What do you notice about the ice as it sits in the warm water?"
+   B: "Look closely -- tell me what's happening to the ice cube."
+   -> {"score": 0.95, "rationale": "both invite observation of melting ice"}
+2) Informal positive:
+   A: "Why do you think the tower fell down?"
+   B: "How come the blocks tumbled when you pushed them?"
+   -> {"score": 0.9, "rationale": "both seek causal reasoning, casual wording"}
+3) Negative:
+   A: "What will happen if we add more water to the soil?"
+   B: "Friends, please put your shoes on and line up at the door."
+   -> {"score": 0.05, "rationale": "B is classroom management, not science"}
+
+REQUIRED OUTPUT
+Respond with exactly one JSON object on a single line and nothing else:
+{"score": <float 0..1>, "rationale": "<=25 words"}

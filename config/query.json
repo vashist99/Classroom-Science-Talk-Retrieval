@@ -1,0 +1,31 @@
+{
+  "version": "query_v1",
+  "_comment": "Step 10 query-time pipeline config (the plan's 'eval.yaml' equivalent; kept as JSON for consistency with the rest of config/).",
+  "reranker_config": "config/reranker.json",
+  "biencoder_config": "config/biencoder.json",
+  "top_k": 20,
+  "aggregation": "max",
+  "_comment_aggregation": "score = max over the top_k LLM pair scores: a phrase is SCIENCE_TALK if it strongly matches ANY science anchor.",
+  "score_threshold": 0.5,
+  "_comment_score_threshold": "UNTUNED placeholder; Step 11 tunes this on dev to maximize F1 under a hard-informal recall floor.",
+  "degraded_cosine_threshold": 0.5,
+  "_comment_degraded": "When the LLM endpoint is unavailable, classify() falls back to bi-encoder cosine and labels via this cosine threshold, with degraded=true.",
+  "max_workers": 8,
+  "per_phrase_wall_clock_cap_s": 60,
+  "model_env": "LLM_MODEL_TRACKB",
+  "prompt_version": "reranker_v1",
+  "smoke": {
+    "_comment": "Capped dev eval for proof-of-correctness. n_pos/n_neg dev phrases each scored against top_k anchors.",
+    "n_pos": 5,
+    "n_neg": 3,
+    "max_new_calls": 250
+  },
+  "full": {
+    "n_pos": 63,
+    "n_neg": 40,
+    "max_new_calls": 3000
+  },
+  "output": {
+    "report_json": "reports/query_eval.json"
+  }
+}
