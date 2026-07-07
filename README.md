@@ -37,8 +37,9 @@ flowchart LR
 - **Human-in-the-loop:** expert review sheets, confidence scoring, and calibration keep
   the tool honest and measurable.
 
-See [architecture_diagram.png](architecture_diagram.png), [DOCUMENTATION.md](DOCUMENTATION.md),
-and [FUNCTION_REFERENCE.md](FUNCTION_REFERENCE.md) for full details.
+See [architecture_diagram.png](architecture_diagram.png) for an overview. Detailed
+internal documentation and the full function reference are maintained privately and are
+not part of this repository.
 
 ## Pipeline steps
 
@@ -60,7 +61,7 @@ and [FUNCTION_REFERENCE.md](FUNCTION_REFERENCE.md) for full details.
 
 Orchestration helpers live in [src/pipeline.py](src/pipeline.py); tests are under
 [tests/](tests/); prompts under [prompts/](prompts/); configuration under
-[config/](config/).
+[config/](config/). Exploratory notebooks and detailed internal docs are kept private.
 
 ## Setup
 
@@ -122,8 +123,6 @@ prompts/       LLM prompt templates
 src/           pipeline modules (steps 0-12)
 scripts/       supporting scripts (deck/writeup/review bundle builders)
 tests/         pytest suite
-notebooks/     exploratory notebooks
-DOCUMENTATION.md, FUNCTION_REFERENCE.md   detailed docs
 ```
 
 ## License
