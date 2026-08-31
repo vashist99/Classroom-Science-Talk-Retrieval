@@ -1,0 +1,7 @@
+gate,flagged_removed,removed_tp,removed_fp,precision_of_removed_pct,remaining_n,remaining_tp,remaining_fp,remaining_precision_pct,lost_tp_among_flagged
+look_exact,600,31,569,5.2,7369,1953,5416,26.5,31
+count_exact,158,1,157,0.6,7811,1983,5828,25.4,1
+shape_color_exact,148,2,146,1.4,7821,1982,5839,25.3,2
+conservative_exact,906,34,872,3.8,7063,1950,5113,27.6,34
+short_1_2,1423,100,1323,7.0,6546,1884,4662,28.8,100
+any_proposed_gate,1703,126,1577,7.4,6266,1858,4408,29.7,126
