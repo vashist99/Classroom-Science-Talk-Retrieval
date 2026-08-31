@@ -1,0 +1,590 @@
+{
+  "n_flagged": 8004,
+  "n_reviewed": 7969,
+  "n_tp": 1984,
+  "n_fp": 5985,
+  "overall_precision_pct": 24.9,
+  "sample": {
+    "n": 400,
+    "seed": 20260831,
+    "design": "100 per speaker \u00d7 scored_by cell, classrooms spread",
+    "speaker": {
+      "adult": 200,
+      "child": 200
+    },
+    "scored_by": {
+      "cosine": 200,
+      "llm": 200
+    },
+    "room_band": {
+      "mid": 194,
+      "low": 180,
+      "high": 26
+    },
+    "classroom": {
+      "21": 119,
+      "12": 32,
+      "73": 32,
+      "14": 32,
+      "84": 28,
+      "85": 27,
+      "63": 20,
+      "38": 19,
+      "10": 16,
+      "74": 15,
+      "49": 14,
+      "37": 11,
+      "67": 11,
+      "83": 9,
+      "46": 9,
+      "92": 6
+    },
+    "label_counts": {
+      "deictic_attention": 86,
+      "classroom_management": 70,
+      "object_naming": 64,
+      "borderline_science": 44,
+      "shape_color": 38,
+      "counting_math": 37,
+      "other": 26,
+      "social_affect": 15,
+      "play_materials": 12,
+      "literacy": 8
+    },
+    "label_by_speaker": {
+      "adult": {
+        "borderline_science": 23,
+        "classroom_management": 38,
+        "counting_math": 25,
+        "deictic_attention": 27,
+        "literacy": 4,
+        "object_naming": 30,
+        "other": 14,
+        "play_materials": 7,
+        "shape_color": 28,
+        "social_affect": 4
+      },
+      "child": {
+        "borderline_science": 21,
+        "classroom_management": 32,
+        "counting_math": 12,
+        "deictic_attention": 59,
+        "literacy": 4,
+        "object_naming": 34,
+        "other": 12,
+        "play_materials": 5,
+        "shape_color": 10,
+        "social_affect": 11
+      }
+    },
+    "label_by_path": {
+      "cosine": {
+        "borderline_science": 13,
+        "classroom_management": 53,
+        "counting_math": 22,
+        "deictic_attention": 34,
+        "literacy": 7,
+        "object_naming": 28,
+        "other": 12,
+        "play_materials": 10,
+        "shape_color": 9,
+        "social_affect": 12
+      },
+      "llm": {
+        "borderline_science": 31,
+        "classroom_management": 17,
+        "counting_math": 15,
+        "deictic_attention": 52,
+        "literacy": 1,
+        "object_naming": 36,
+        "other": 14,
+        "play_materials": 2,
+        "shape_color": 29,
+        "social_affect": 3
+      }
+    },
+    "label_by_band": {
+      "high": {
+        "borderline_science": 4,
+        "classroom_management": 5,
+        "counting_math": 2,
+        "deictic_attention": 5,
+        "literacy": 0,
+        "object_naming": 2,
+        "other": 3,
+        "play_materials": 0,
+        "shape_color": 5,
+        "social_affect": 0
+      },
+      "low": {
+        "borderline_science": 11,
+        "classroom_management": 38,
+        "counting_math": 13,
+        "deictic_attention": 39,
+        "literacy": 7,
+        "object_naming": 29,
+        "other": 13,
+        "play_materials": 7,
+        "shape_color": 15,
+        "social_affect": 8
+      },
+      "mid": {
+        "borderline_science": 29,
+        "classroom_management": 27,
+        "counting_math": 22,
+        "deictic_attention": 42,
+        "literacy": 1,
+        "object_naming": 33,
+        "other": 10,
+        "play_materials": 5,
+        "shape_color": 18,
+        "social_affect": 7
+      }
+    },
+    "examples": {
+      "borderline_science": [
+        "You know, if it gets cold, you have to go to a point after that.",
+        "Is that a bug?",
+        "How did that happen? Yeah, how did it happen? I was there. I was there. It's right here.",
+        "But my question is, what's going to happen now?",
+        "because they're laying down.",
+        "I think what she has, because what you have,"
+      ],
+      "classroom_management": [
+        "Carry. Carry. Carry.",
+        "You go under, okay?",
+        "I'm going to put it in.",
+        "All right, we have Lily.",
+        "Addy, have a seat please.",
+        "Oh, all the way to our spot."
+      ],
+      "counting_math": [
+        "Two.",
+        "Actually I think that's been, oh no there's one more.",
+        "Oh, it's just like we're listening to how many interactions are between teachers and",
+        "Eight.",
+        "Three, two, one.",
+        "One, two, three, four."
+      ],
+      "deictic_attention": [
+        "Look at this way.",
+        "then he'd know where he looked and where he needed to look.",
+        "Raise your hand, look this way.",
+        "Look at that.",
+        "Look at the hand.",
+        "I saw that."
+      ],
+      "literacy": [
+        "We have plenty of stuff I copied.",
+        "Please, um, write your name on that side.",
+        "No, and not how many letters. Look at me. Jackson.",
+        "Mother Goat put the rocks she collected carefully inside the hoof.",
+        "There's no need to write it so big.",
+        "I don't have a name."
+      ],
+      "object_naming": [
+        "No ice.",
+        "She could go so many ways. The airplane, the train, the car.",
+        "Knees together.",
+        "Do you have a Christmas tree?",
+        "Feet apart.",
+        "The box!"
+      ],
+      "other": [
+        "Yeah, that was a lot.",
+        "It's so long.",
+        "It's just a little device that we're going to use.",
+        "No, that has that cheese that you can't have. I want yogurt.",
+        "I think we are eating it.",
+        "This always happens to me. I'm trying to grab something, but the stuff at the top doesn't let me."
+      ],
+      "play_materials": [
+        "Play-Doh is full. Play-Doh is full.",
+        "fruits to collect and you have to use your spoon to scoop your fruit okay all",
+        "I can't get this. I might need your help, Ms. Abel. I'm trying to get some paper.",
+        "Can I, model?",
+        "It's a play girl.",
+        "Cameron, what are we doing first on our paper?"
+      ],
+      "shape_color": [
+        "To put a square up, a square over there.",
+        "What shape is that?",
+        "The front, the back, the top, the side.",
+        "Aiden is looking for gray.",
+        "W, circle.",
+        "Do you see? What color did you make your snake?"
+      ],
+      "social_affect": [
+        "Scared, kind of scared.",
+        "Do you think she'll like that one?",
+        "You need to color yours.",
+        "I see my friend.",
+        "That was my foot.",
+        "Where are you?"
+      ]
+    },
+    "n_hand_coded": 150
+  },
+  "population_fp_labels": {
+    "other": 2502,
+    "deictic_attention": 1187,
+    "object_naming": 510,
+    "classroom_management": 438,
+    "borderline_science": 399,
+    "counting_math": 371,
+    "shape_color": 357,
+    "play_materials": 94,
+    "literacy": 86,
+    "social_affect": 41
+  },
+  "n_population_fp": 5985,
+  "cosine": {
+    "cosine_only": {
+      "n": 2327,
+      "tp": 224,
+      "fp": 2103,
+      "precision_pct": 9.6
+    },
+    "llm_only": {
+      "n": 5642,
+      "tp": 1760,
+      "fp": 3882,
+      "precision_pct": 31.2
+    },
+    "drop_all_cosine": {
+      "n": 5642,
+      "tp": 1760,
+      "fp": 3882,
+      "precision_pct": 31.2
+    },
+    "score_bins": [
+      {
+        "bin": "[0.4, 0.42)",
+        "n": 1192,
+        "tp": 132,
+        "fp": 1060,
+        "precision_pct": 11.1
+      },
+      {
+        "bin": "[0.42, 0.44)",
+        "n": 689,
+        "tp": 44,
+        "fp": 645,
+        "precision_pct": 6.4
+      },
+      {
+        "bin": "[0.44, 0.46)",
+        "n": 370,
+        "tp": 37,
+        "fp": 333,
+        "precision_pct": 10.0
+      },
+      {
+        "bin": "[0.46, 0.48)",
+        "n": 68,
+        "tp": 10,
+        "fp": 58,
+        "precision_pct": 14.7
+      },
+      {
+        "bin": "[0.48, 0.5)",
+        "n": 8,
+        "tp": 1,
+        "fp": 7,
+        "precision_pct": 12.5
+      }
+    ],
+    "threshold_sweep": [
+      {
+        "n": 7969,
+        "tp": 1984,
+        "fp": 5985,
+        "precision_pct": 24.9,
+        "cosine_min": 0.4,
+        "dropped_flags": 0,
+        "lost_tp_among_flagged": 0
+      },
+      {
+        "n": 6777,
+        "tp": 1852,
+        "fp": 4925,
+        "precision_pct": 27.3,
+        "cosine_min": 0.42,
+        "dropped_flags": 1192,
+        "lost_tp_among_flagged": 132
+      },
+      {
+        "n": 6088,
+        "tp": 1808,
+        "fp": 4280,
+        "precision_pct": 29.7,
+        "cosine_min": 0.44,
+        "dropped_flags": 1881,
+        "lost_tp_among_flagged": 176
+      },
+      {
+        "n": 5856,
+        "tp": 1786,
+        "fp": 4070,
+        "precision_pct": 30.5,
+        "cosine_min": 0.45,
+        "dropped_flags": 2113,
+        "lost_tp_among_flagged": 198
+      },
+      {
+        "n": 5718,
+        "tp": 1771,
+        "fp": 3947,
+        "precision_pct": 31.0,
+        "cosine_min": 0.46,
+        "dropped_flags": 2251,
+        "lost_tp_among_flagged": 213
+      },
+      {
+        "n": 5650,
+        "tp": 1761,
+        "fp": 3889,
+        "precision_pct": 31.2,
+        "cosine_min": 0.48,
+        "dropped_flags": 2319,
+        "lost_tp_among_flagged": 223
+      },
+      {
+        "n": 5642,
+        "tp": 1760,
+        "fp": 3882,
+        "precision_pct": 31.2,
+        "cosine_min": 0.5,
+        "dropped_flags": 2327,
+        "lost_tp_among_flagged": 224
+      },
+      {
+        "n": 5642,
+        "tp": 1760,
+        "fp": 3882,
+        "precision_pct": 31.2,
+        "cosine_min": 0.55,
+        "dropped_flags": 2327,
+        "lost_tp_among_flagged": 224
+      }
+    ],
+    "cosine_tp_profile": {
+      "n": 224,
+      "mean_words": 6.75,
+      "median_words": 5.0,
+      "n_short_1_2": 17,
+      "n_science_holdout": 43
+    },
+    "cosine_tp_examples": [
+      "Is it sunny outside?",
+      "No, it got bigger.",
+      "Yay! And they lived happily together in their nest.",
+      "your sense of sight, you can use your",
+      "They sleep all winter long.",
+      "A mother bird sat on her nest and on her eggs.",
+      "That's how they hatched them. They keep them real warm.",
+      "We're going to get going here.",
+      "And we can't fly.",
+      "or a mouse.",
+      "No, no, or a moose.",
+      "Because lemons are actually sour.",
+      "I think it's going to taste like chocolatey.",
+      "Or a mouse.",
+      "A mouse."
+    ]
+  },
+  "gates": {
+    "per_gate": [
+      {
+        "gate": "look_exact",
+        "flagged_removed": 600,
+        "removed_tp": 31,
+        "removed_fp": 569,
+        "precision_of_removed_pct": 5.2,
+        "remaining_n": 7369,
+        "remaining_tp": 1953,
+        "remaining_fp": 5416,
+        "remaining_precision_pct": 26.5,
+        "lost_tp_among_flagged": 31
+      },
+      {
+        "gate": "count_exact",
+        "flagged_removed": 158,
+        "removed_tp": 1,
+        "removed_fp": 157,
+        "precision_of_removed_pct": 0.6,
+        "remaining_n": 7811,
+        "remaining_tp": 1983,
+        "remaining_fp": 5828,
+        "remaining_precision_pct": 25.4,
+        "lost_tp_among_flagged": 1
+      },
+      {
+        "gate": "shape_color_exact",
+        "flagged_removed": 148,
+        "removed_tp": 2,
+        "removed_fp": 146,
+        "precision_of_removed_pct": 1.4,
+        "remaining_n": 7821,
+        "remaining_tp": 1982,
+        "remaining_fp": 5839,
+        "remaining_precision_pct": 25.3,
+        "lost_tp_among_flagged": 2
+      },
+      {
+        "gate": "conservative_exact",
+        "flagged_removed": 906,
+        "removed_tp": 34,
+        "removed_fp": 872,
+        "precision_of_removed_pct": 3.8,
+        "remaining_n": 7063,
+        "remaining_tp": 1950,
+        "remaining_fp": 5113,
+        "remaining_precision_pct": 27.6,
+        "lost_tp_among_flagged": 34
+      },
+      {
+        "gate": "short_1_2",
+        "flagged_removed": 1423,
+        "removed_tp": 100,
+        "removed_fp": 1323,
+        "precision_of_removed_pct": 7.0,
+        "remaining_n": 6546,
+        "remaining_tp": 1884,
+        "remaining_fp": 4662,
+        "remaining_precision_pct": 28.8,
+        "lost_tp_among_flagged": 100
+      },
+      {
+        "gate": "any_proposed_gate",
+        "flagged_removed": 1703,
+        "removed_tp": 126,
+        "removed_fp": 1577,
+        "precision_of_removed_pct": 7.4,
+        "remaining_n": 6266,
+        "remaining_tp": 1858,
+        "remaining_fp": 4408,
+        "remaining_precision_pct": 29.7,
+        "lost_tp_among_flagged": 126
+      }
+    ],
+    "naive_short_no_holdout": {
+      "removed": {
+        "n": 1687,
+        "tp": 244,
+        "fp": 1443,
+        "precision_pct": 14.5
+      },
+      "remaining": {
+        "n": 6282,
+        "tp": 1740,
+        "fp": 4542,
+        "precision_pct": 27.7
+      }
+    },
+    "holdout_lexicon_size": 128,
+    "short_tp_n": 244,
+    "short_tp_holdout_n": 144,
+    "short_tp_still_gated_n": 100,
+    "holdout_examples": [
+      "It's hot.",
+      "Windy?",
+      "Cloudy?",
+      "An elephant.",
+      "A kangaroo.",
+      "Iguana.",
+      "A mouse.",
+      "A skunk.",
+      "A skunk!",
+      "Strawberry.",
+      "Carrots.",
+      "Carrots?",
+      "A fruit.",
+      "Strawberry",
+      "Caterpillar?",
+      "Caterpillar.",
+      "A caterpillar?",
+      "Jellyfish.",
+      "Jellyfish. Jellyfish.",
+      "Ocean."
+    ],
+    "short_tp_lost_examples": [
+      "What's hibernation?",
+      "To grow.",
+      "Fire ants.",
+      "Sea horse.",
+      "Fire.",
+      "A flower.",
+      "A bumblebee.",
+      "Black.",
+      "Non-living thing!",
+      "Night turtle.",
+      "A wolf.",
+      "Eye, nose.",
+      "Not living.",
+      "They're big.",
+      "He's sleeping.",
+      "Square.",
+      "They're growing.",
+      "Little branch.",
+      "chasing prey.",
+      "tree branches."
+    ],
+    "one_word_tp_n": 134,
+    "one_word_tp_examples": [
+      "Windy?",
+      "Cloudy?",
+      "Iguana.",
+      "Strawberry.",
+      "Carrots.",
+      "Carrots?",
+      "Strawberry",
+      "Caterpillar?",
+      "Caterpillar.",
+      "Jellyfish.",
+      "Ocean.",
+      "Honey.",
+      "Mantis!",
+      "Ladybugs.",
+      "Vegetable.",
+      "Seahorse.",
+      "Animal.",
+      "Fire.",
+      "Black.",
+      "veterinarian.",
+      "Butterfly.",
+      "Carnivore.",
+      "Plants.",
+      "Dino.",
+      "Observe!"
+    ],
+    "cosine_or_gate": {
+      "dropped": {
+        "n": 3614,
+        "tp": 346,
+        "fp": 3268,
+        "precision_pct": 9.6
+      },
+      "remaining": {
+        "n": 4355,
+        "tp": 1638,
+        "fp": 2717,
+        "precision_pct": 37.6
+      }
+    },
+    "cosine_or_conservative": {
+      "dropped": {
+        "n": 3038,
+        "tp": 257,
+        "fp": 2781,
+        "precision_pct": 8.5
+      },
+      "remaining": {
+        "n": 4931,
+        "tp": 1727,
+        "fp": 3204,
+        "precision_pct": 35.0
+      }
+    }
+  }
+}
