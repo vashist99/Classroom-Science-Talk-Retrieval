@@ -4,37 +4,58 @@
 **Date:** 31 August 2026
 **Sample:** 83 human-coded Y2 workbooks, 16 classrooms, 7,969 reviewed model `SCIENCE_TALK` flags (1,984 confirmed, 5,985 rejected). Precision of the current deploy is **24.9%**.
 
-This memo does the first three analyses proposed after that review. It does **not** estimate recall. Unflagged utterances were never shown to reviewers, so every “lost TP” figure below is a TP *among already-flagged rows*, not a TP in the full transcript.
-
-Reproduce with `python error_analysis/run_analyses.py` (requires `Human coded/*.xlsx`). Artifacts land in `error_analysis/output/`.
+This memo presents three analyses on those reviewed flags. Each section starts with the **question**, then **how this was done**, then the tables.
 
 ---
 
-## What we measured, and what we did not
+## Shared setup (all three analyses)
 
-| Quantity | Status |
+**What the model did.** For each classroom utterance it either said SCIENCE_TALK or not. Reviewer sheets include **only** the SCIENCE_TALK ones.
+
+**What the human did.** For each of those flags, a reviewer marked SCIENCE_TALK (agree) or NOT_SCIENCE_TALK (reject).
+
+**What that means.** Measurable: *of the flags the model showed, how often was the model right?* Not measurable: *how much real science talk the model never showed.*
+
+| Term | Meaning here |
 |---|---|
-| Precision of current SCIENCE_TALK flags | 24.9% (1,984 / 7,969) |
-| False-positive taxonomy on a stratified 400 | Done (150 hand-coded residuals) |
-| Effect of raising / dropping the cosine fallback | Done, on flagged rows only |
-| Effect of look / count / shape / short gates + science-name hold-out | Done, on flagged rows only |
-| Recall / missed science talk in unflagged speech | **Not measured** — needs a new unflagged sample |
+| Flag | An utterance the model labeled SCIENCE_TALK |
+| True positive (TP) | Human also said SCIENCE_TALK |
+| False positive (FP) | Human said NOT_SCIENCE_TALK |
+| Precision | TP / (TP + FP). Current value: **24.9%** |
+| Lost TP among flagged | A confirmed science flag a new rule would drop. Not a miss in the full transcript. |
+| LLM path | Flag scored by the large-language-model reranker (usually score = 0.90) |
+| Cosine path | Flag scored by embedding similarity only. No LLM. Score 0.40–0.48. |
 
-Sheets are `science_only=true`: they contain only model `SCIENCE_TALK`. Humans then marked `SCIENCE_TALK` or `NOT_SCIENCE_TALK`. That is a precision sample, not a confusion matrix over all talk.
+| Done | Not done |
+|---|---|
+| Precision of current flags: 24.9% (1,984 / 7,969) | Recall (science talk the model never flagged) |
+| Taxonomy of 400 FPs | Accuracy over all classroom talk |
+| Cosine raise / drop | |
+| Look / count / shape / short gates | |
 
 ---
 
-## Analysis 1 — False-positive taxonomy (n = 400)
+## Analysis 1 — What kinds of mistakes are the false positives?
 
-### Design
+**Question.** When a human rejects a flag, *what kind of talk was it?* (pointing, counting, management, a real science maybe, …)
 
-- Population: 5,985 human-rejected flags.
-- Sample: **400**, seed `20260831`.
-- Stratification: **100 per speaker × scoring-path cell** (adult/child × llm/cosine), classrooms spread inside each cell.
-- Coding: rule-based codebook first (`error_analysis/codebook.py`), then **hand codes for all 150 residuals** that the rules left as `other` (`error_analysis/hand_codes.py`).
-- Labels are mutually exclusive. First matching rule wins; hand codes override for the residual set.
+**How this was done**
 
-The sample is balanced on speaker and scoring path, so it **oversamples cosine** (50% of the sample vs 35% of all FPs) and **low-precision rooms** (Classroom 21 alone is 119 of 400). Sample percentages are for coverage of error types, not population prevalence. Rule-based labels on all 5,985 FPs are reported beside the sample as a lower-bound check on the cheap buckets.
+1. Start from all **5,985** human rejects.
+2. Draw **400** of them, not purely at random.
+3. Split into four equal buckets of 100, so each group is represented:
+   - adult + LLM
+   - adult + cosine
+   - child + LLM
+   - child + cosine
+4. Inside each bucket, take utterances from as many classrooms as possible.
+5. Assign **one** label per utterance (codebook below).
+6. Auto-label first with simple rules (`Look.` → deictic, `Two.` → counting, …).
+7. Hand-label the **150** the rules could not place.
+
+**How to read the counts.** Percents are *of this 400*, not of all 5,985. The sample was forced to 50% cosine; in the full data cosine is only 35% of FPs. The 400 shows *what error types exist*, not a census of every reject.
+
+**Limit.** Classroom 21 is 119 of 400 because it produced many FPs. High-precision rooms are thin in the sample.
 
 ### Codebook
 
@@ -92,9 +113,25 @@ The coded sheet is `error_analysis/output/fp_sample_400_coded.csv`.
 
 ---
 
-## Analysis 2 — Cosine fallback: raise it, or drop it
+## Analysis 2 — Raise the cosine cutoff, or drop cosine-only flags?
 
-Every cosine-only flag in this sample has cosine **0.40–0.48**. None would survive a 0.50 threshold. The LLM path never uses that band: its scores collapse at 0.90–0.93.
+**Question.** Some flags never went through the LLM. They were labeled SCIENCE_TALK because embedding similarity (cosine) was at least 0.40. Are those flags any good? If 0.40 is raised, or those flags are dropped, what happens to precision?
+
+**How this was done**
+
+1. Split the 7,969 reviewed flags into two groups: **LLM** vs **cosine-only**.
+2. Compute precision in each group (Table 2).
+3. For cosine-only flags only, bin the cosine score (0.40–0.42, 0.42–0.44, …) and compute precision in each bin (Table 3).
+4. Simulate a new rule: **keep every LLM flag**. Keep a cosine flag only if its cosine is ≥ *t*. Repeat for t = 0.40, 0.42, …, 0.50 (Table 4).
+5. At t = 0.50, no cosine flag survives (all of them are below 0.50). That row is “drop cosine-only SCIENCE_TALK.”
+
+**How to read Table 4**
+
+- Remaining flags = what would still appear on the review sheet.
+- Remaining TP = confirmed science that would still be kept.
+- Lost TP among flagged = confirmed science that would be dropped. Still not full-transcript recall.
+
+**Result (short).** Cosine-only flags are 9.6% precise. All of them sit in 0.40–0.48. Raising 0.40 a little does not find a clean cut. Dropping them moves overall precision from 24.9% to 31.2% and costs 224 confirmed flags.
 
 | Path | Reviewed flags | TP | FP | Precision |
 |---|---:|---:|---:|---:|
@@ -134,13 +171,35 @@ Dropping cosine-only SCIENCE_TALK labels:
 - Removes 2,103 FPs and 224 TPs among flagged (11.3% of all confirmed science flags)
 - Those 224 cosine TPs are longer than typical FPs (mean 6.8 words, median 5). 43 of them are science-content names the hold-out lexicon would keep. Examples that *would* be lost: `Is it sunny outside?`, `They sleep all winter long.`, `Because lemons are actually sour.`, `A mouse.`
 
-**Recommendation:** do not nibble the threshold. Either (a) stop writing cosine-only rows as `SCIENCE_TALK` (require LLM confirmation, even if that means they wait on the budget cap), or (b) keep them in the workbook but on a separate “cosine-only, not for the analytic sample” sheet so reviewers are not counting 9.6%-precise rows as model science talk.
+**Recommendation:** do not nibble the threshold. Either (a) stop writing cosine-only rows as `SCIENCE_TALK` (require LLM confirmation, even if those rows wait on the budget cap), or (b) keep them in the workbook but on a separate “cosine-only, not for the analytic sample” sheet so reviewers are not counting 9.6%-precise rows as model science talk.
 
 ---
 
-## Analysis 3 — Gates before Track B, with a science-name hold-out
+## Analysis 3 — Drop obvious junk *before* the LLM, without dropping real science names?
 
-Gates fire only when the utterance is **not** a science-content name (`Iguana.`, `Jellyfish.`, `Habitat.`, `It's hot.`, `A kangaroo.`, …). The lexicon is in `codebook.py` (128 tokens, built from TP-enriched words plus confirmed short TPs).
+**Question.** A lot of FPs are `Look.`, `Two.`, `Circle.` Can those be dropped with simple rules *before* the expensive reranker — without also dropping real one-word science (`Iguana.`, `Jellyfish.`)?
+
+**How this was done**
+
+1. Four simple “drop this utterance” rules (a **gate**):
+   - exact look-family (`Look.` / `Look at that.`)
+   - exact count / “how many”
+   - exact shape or color (`Circle.` / `What color?`)
+   - short: 1 or 2 words
+2. A **hold-out list** of science-content names (128 words: iguana, habitat, pollen, jellyfish, …). If the utterance is basically one of those names, it is **not gated**.
+3. Each gate is applied to all 7,969 reviewed flags.
+4. For each gate, count:
+   - how many flags it would remove
+   - how many of those were TP vs FP
+   - precision of what remains
+5. Gates are then stacked with the cosine decision from Analysis 2 (Table 6).
+
+**How to read Table 5**
+
+- Precision of removed = if this gate deletes a row, how often was that row actually science? Low is good (junk is being deleted).
+- Remaining precision = precision of the sheet *after* the gate.
+
+**Hold-out check.** The 1–2 word gate without the hold-out deletes 244 TPs. With it, 100. The list saved 144 short confirmed names. It is not finished: 100 confirmed names still slip through (`What's hibernation?`, `A bumblebee.`).
 
 ### Per-gate effect on the 7,969 reviewed flags
 
