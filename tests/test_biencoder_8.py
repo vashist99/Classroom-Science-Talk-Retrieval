@@ -254,6 +254,37 @@ def test_config_loads_and_has_required_keys():
     assert "train" in cfg and "eval" in cfg and "output" in cfg
 
 
+def test_nomic_transformers5_attention_mask_compat():
+    """transformers 5 dropped get_extended_attention_mask; nomic remote code still calls it."""
+    import torch
+    from transformers import PreTrainedModel
+
+    original = getattr(PreTrainedModel, "get_extended_attention_mask", None)
+    try:
+        if hasattr(PreTrainedModel, "get_extended_attention_mask"):
+            delattr(PreTrainedModel, "get_extended_attention_mask")
+        b8.ensure_nomic_transformers5_compat()
+        assert hasattr(PreTrainedModel, "get_extended_attention_mask")
+
+        class Dummy:
+            dtype = torch.float32
+
+        mask = torch.tensor([[1.0, 1.0, 0.0]])
+        extended = PreTrainedModel.get_extended_attention_mask(
+            Dummy(), mask, mask.shape
+        )
+        assert tuple(extended.shape) == (1, 1, 1, 3)
+        assert float(extended[0, 0, 0, 0]) == 0.0
+        assert float(extended[0, 0, 0, 2]) < -1e4
+    finally:
+        if original is None:
+            if hasattr(PreTrainedModel, "get_extended_attention_mask"):
+                delattr(PreTrainedModel, "get_extended_attention_mask")
+        else:
+            PreTrainedModel.get_extended_attention_mask = original
+        b8.ensure_nomic_transformers5_compat()
+
+
 # ---------------------------------------------------------------------------
 # Heavy: real download + CPU fine-tune (opt-in)
 # ---------------------------------------------------------------------------

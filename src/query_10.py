@@ -74,9 +74,9 @@ class QueryPipeline:
         verbose: bool = True,
     ) -> None:
         import os
-        from sentence_transformers import SentenceTransformer
         from src import reranker_9 as r9
         from src.biencoder_8 import load_config as load_bicfg
+        from src.biencoder_8 import load_sentence_transformer
 
         self.processed_dir = Path(processed_dir)
         self.config = load_config(config_path)
@@ -102,7 +102,7 @@ class QueryPipeline:
             raise RuntimeError(
                 "Step 10 requires Step 8 artifacts (models/biencoder + "
                 "corpus_embeddings.npy). Run `python src/biencoder_8.py` first.")
-        self.model = SentenceTransformer(str(model_dir), trust_remote_code=True, device="cpu")
+        self.model = load_sentence_transformer(model_dir, device="cpu")
         self.corpus_emb = np.load(emb_path).astype(np.float32)
         meta = pd.read_parquet(meta_path)
         self.meta_utt_ids = meta["utt_id"].astype(str).tolist()
@@ -158,37 +158,53 @@ class QueryPipeline:
         return cands
 
     # ------------------------------------------------------------------ rerank
-    def _score_one(self, phrase: str, cand: dict) -> dict:
+    def _score_one(self, phrase: str, cand: dict,
+                   context_before: list[dict] | None = None,
+                   context_after: list[dict] | None = None) -> dict:
         try:
+            # Phrase A is the known science anchor. Phrase B is the classroom
+            # line, which is the utterance the rubric accepts or rejects.
+            # Neighboring lines belong to that classroom line.
             s, rat = self._r9.score_pair_full(
-                phrase, cand["utterance"], caller=self.caller,
+                cand["utterance"], phrase, caller=self.caller,
                 system_prompt=self.system_prompt, prompt_version=self.prompt_version,
-                max_retries=self.max_retries, row_id=cand["utt_id"], verbose=False)
+                max_retries=self.max_retries, row_id=cand["utt_id"], verbose=False,
+                context_before=context_before, context_after=context_after)
             return {"llm_score": s, "rationale": rat, "error": None}
+        except self._r9.KeysExhausted:
+            raise
         except self._r9.RerankerParseError:
             return {"llm_score": None, "rationale": "parse_failed", "error": "parse"}
         except Exception as e:  # noqa: BLE001 - endpoint/network failure -> degrade
             return {"llm_score": None, "rationale": f"error:{type(e).__name__}",
                     "error": "network"}
 
-    def rerank(self, phrase: str, candidates: list[dict]) -> list[dict]:
+    def rerank(self, phrase: str, candidates: list[dict], *,
+               context_before: list[dict] | None = None,
+               context_after: list[dict] | None = None) -> list[dict]:
         results: list[dict | None] = [None] * len(candidates)
         if self.max_workers > 1 and len(candidates) > 1:
             with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
-                futs = {ex.submit(self._score_one, phrase, c): i
+                futs = {ex.submit(self._score_one, phrase, c,
+                                  context_before, context_after): i
                         for i, c in enumerate(candidates)}
                 for fut in as_completed(futs):
                     results[futs[fut]] = fut.result()
         else:
-            results = [self._score_one(phrase, c) for c in candidates]
+            results = [self._score_one(phrase, c, context_before, context_after)
+                       for c in candidates]
         return results  # type: ignore[return-value]
 
     # ---------------------------------------------------------------- classify
-    def classify(self, phrase: str, *, top_k: int | None = None) -> dict:
+    def classify(self, phrase: str, *, top_k: int | None = None,
+                 context_before: list[dict] | None = None,
+                 context_after: list[dict] | None = None) -> dict:
         top_k = top_k or self.top_k
         t0 = time.perf_counter()
         cands, embed_s, search_s = self._embed_and_search(phrase, top_k)
-        scored = self.rerank(phrase, cands)
+        scored = self.rerank(
+            phrase, cands,
+            context_before=context_before, context_after=context_after)
         elapsed = time.perf_counter() - t0
 
         merged = [{

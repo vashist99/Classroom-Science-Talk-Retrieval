@@ -94,9 +94,9 @@ def standardize_not_science(review_dir: Path) -> int:
 
 
 def standardize_pairs(review_dir: Path) -> int:
-    path = review_dir / "review_queue.xlsx"
+    path = review_dir / "review_queue_6.xlsx"
     if not path.exists():
-        print("  (skip) review_queue.xlsx missing")
+        print("  (skip) review_queue_6.xlsx missing")
         return 0
     df = pd.read_excel(path)
     df = _order_columns(
@@ -125,9 +125,9 @@ def standardize_pairs(review_dir: Path) -> int:
 
 
 def standardize_routing(review_dir: Path) -> int:
-    path = review_dir / "routing_audit_template.xlsx"
+    path = review_dir / "routing_audit_template_5.xlsx"
     if not path.exists():
-        print("  (skip) routing_audit_template.xlsx missing")
+        print("  (skip) routing_audit_template_5.xlsx missing")
         return 0
     df = pd.read_excel(path)
     df = _order_columns(
@@ -167,7 +167,7 @@ def export_and_standardize_negatives(review_dir: Path) -> int:
     view["review_human_label"] = pd.NA
     view["review_notes"] = pd.NA
 
-    path = review_dir / "negatives_review.xlsx"
+    path = review_dir / "negatives_review_3.xlsx"
     _write_workbook(view, path, [
         "TASK 4 - Quality check on the 'NOT science talk' examples",
         "",
@@ -194,15 +194,15 @@ def write_manifest(review_dir: Path, counts: dict) -> None:
         "",
         "FILES (please return all four):",
         f"  1. not_science_review.xlsx   ({counts.get('not_science', 0)} rows) - keep/drop/edit real utterances",
-        f"  2. review_queue.xlsx         ({counts.get('pairs', 0)} rows) - accept/reject/edit AI paraphrases",
-        f"  3. routing_audit_template.xlsx ({counts.get('routing', 0)} rows) - spot-check auto-sorting",
-        f"  4. negatives_review.xlsx     ({counts.get('negatives', 0)} rows) - confirm non-science examples",
+        f"  2. review_queue_6.xlsx         ({counts.get('pairs', 0)} rows) - accept/reject/edit AI paraphrases",
+        f"  3. routing_audit_template_5.xlsx ({counts.get('routing', 0)} rows) - spot-check auto-sorting",
+        f"  4. negatives_review_3.xlsx     ({counts.get('negatives', 0)} rows) - confirm non-science examples",
         "",
         "Each workbook: 'Review' tab = your work; 'INSTRUCTIONS' tab = how to fill it.",
         "Do not reorder/delete rows or change ID columns.",
         "",
-        "DO NOT send back: review_queue_corrected.xlsx, routing_audit_scored.xlsx,",
-        "  routing_audit_disagreements.xlsx (these are from a previous round).",
+        "DO NOT send back: review_queue_corrected_6.xlsx, routing_audit_scored_5.xlsx,",
+        "  routing_audit_disagreements_5.xlsx (these are from a previous round).",
     ]
     (review_dir / "MANIFEST.txt").write_text("\n".join(lines), encoding="utf-8")
     print(f"  wrote MANIFEST.txt")

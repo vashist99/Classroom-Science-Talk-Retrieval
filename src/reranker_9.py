@@ -32,6 +32,8 @@ import json
 import os
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -55,6 +57,10 @@ Caller = Callable[[str, str, str], str]
 
 class RerankerParseError(ValueError):
     """Raised when the model output cannot be parsed into a score."""
+
+
+class KeysExhausted(RuntimeError):
+    """Every configured API key returned a quota or credential error."""
 
 
 # ---------------------------------------------------------------------------
@@ -101,12 +107,44 @@ def build_system_prompt(
     return tmpl.replace("{operational_definitions}", defs)
 
 
-def build_user_message(query: str, candidate: str) -> str:
-    return (
-        f'Phrase A (query): "{query}"\n'
-        f'Phrase B (candidate): "{candidate}"\n\n'
-        "Return ONLY the JSON object."
-    )
+def _format_context_turns(turns: list[dict] | None) -> str:
+    """One speaker-labeled line per neighboring utterance. Unquoted so the
+    pair parser still sees Phrase A and Phrase B as the first two quotes."""
+    if not turns:
+        return "- (none)"
+    rows: list[str] = []
+    for turn in turns:
+        speaker = str(turn.get("speaker") or "speaker").strip() or "speaker"
+        utterance = " ".join(str(turn.get("utterance") or "").split())
+        rows.append(f"- {speaker}: {utterance}")
+    return "\n".join(rows)
+
+
+def build_user_message(
+    query: str,
+    candidate: str,
+    *,
+    context_before: list[dict] | None = None,
+    context_after: list[dict] | None = None,
+) -> str:
+    """Pair prompt. A context window is included only when the caller passes
+    before/after lists (the Y2 deploy path). Dev scoring omits them."""
+    lines = [
+        f'Phrase A (query): "{query}"',
+        f'Phrase B (candidate): "{candidate}"',
+    ]
+    if context_before is not None or context_after is not None:
+        lines += [
+            "",
+            "Surrounding classroom lines for Phrase B. "
+            "Use them only to interpret Phrase B. Do not score these lines.",
+            "Before:",
+            _format_context_turns(context_before),
+            "After:",
+            _format_context_turns(context_after),
+        ]
+    lines += ["", "Return ONLY the JSON object."]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -158,11 +196,18 @@ class CallLedger:
             self.misses += 1
 
 
-# Markers in an endpoint error body that mean "this key's budget/credential is
-# spent" -> rotate to the next key. Rate-limit/transient blips are NOT here so we
-# retry the same key instead of burning through the pool.
+# A rate limit is temporary: retry the same key. These are checked before the
+# budget markers so "rate limit exceeded" does not retire a key.
+_RATE_LIMIT_MARKERS = (
+    "rate limit", "rate-limit", "ratelimit", "too many requests", "429",
+)
+_RATE_LIMIT_RETRIES = 2
+_RATE_LIMIT_WAIT_S = 2.0
+
+# Budget or credential failure -> rotate to the next key. Bare "exceeded" is
+# not included: it also appears in rate-limit and context-length errors.
 _QUOTA_AUTH_MARKERS = (
-    "quota", "budget", "credit", "balance", "insufficient", "exceeded",
+    "quota", "budget", "credit", "balance", "insufficient",
     "spending limit", "payment", "unauthor", "invalid api key", "invalid_api_key",
     "expired", "forbidden", "402", "401", "403",
 )
@@ -192,9 +237,14 @@ def _collect_api_keys(primary_env: str) -> list[str]:
 
 
 def _response_kind(raw) -> str:
-    """Classify an endpoint response: 'ok' | 'quota_auth' | 'transient'."""
+    """Classify an endpoint response.
+
+    'ok' | 'quota_auth' (rotate) | 'rate_limit' (wait, same key) | 'transient'.
+    """
     if isinstance(raw, dict) and raw.get("error"):
         blob = json.dumps(raw["error"]).lower()
+        if any(m in blob for m in _RATE_LIMIT_MARKERS):
+            return "rate_limit"
         if any(m in blob for m in _QUOTA_AUTH_MARKERS):
             return "quota_auth"
         return "transient"
@@ -217,9 +267,9 @@ def make_real_caller(
 ) -> Caller:
     """Build a caller hitting the UF endpoint via `cached_request`.
 
-    Supports automatic API-key rotation: when a key's budget/credential is
-    exhausted (endpoint returns a quota/auth error), the caller advances to the
-    next key in the pool and retries. Provide extra keys as `LLM_API_KEY_2`,
+    Supports automatic API-key rotation: when a key's budget or credential is
+    rejected, the caller advances to the next key and retries. A rate limit
+    waits and retries the same key. Provide extra keys as `LLM_API_KEY_2`,
     `LLM_API_KEY_3`, ... (or a comma-separated list in `LLM_API_KEY`). Because the
     response cache is keyed on the request (not the key), already-scored pairs
     stay free across rotation.
@@ -236,6 +286,15 @@ def make_real_caller(
         print(f"[reranker] {len(keys)} API keys available for rotation.")
 
     state = {"idx": 0}  # sticky current-key index across calls
+    key_lock = threading.Lock()
+
+    def _retire_key(failed_idx: int) -> bool:
+        """Move past `failed_idx` at most once. Parallel callers share one step."""
+        with key_lock:
+            if state["idx"] == failed_idx:
+                state["idx"] = failed_idx + 1
+                return True
+            return False
 
     def _call(system: str, user: str, prompt_version: str) -> str:
         params = {
@@ -250,9 +309,14 @@ def make_real_caller(
         if ledger is not None:
             ledger.classify(model=model, params=params, prompt_version=prompt_version)
         cpath = _cache_path(_make_cache_key(prompt_version, model, "completion", params))
+        rate_tries = 0
 
-        while state["idx"] < len(keys):
-            key = keys[state["idx"]]
+        while True:
+            with key_lock:
+                idx = state["idx"]
+            if idx >= len(keys):
+                break
+            key = keys[idx]
             try:
                 raw = cached_request(
                     api_key=key, url=url, endpoint="completion",
@@ -272,17 +336,33 @@ def make_real_caller(
             # (this key retried, or the next key) re-hits the network.
             cpath.unlink(missing_ok=True)
 
-            if kind == "quota_auth":
+            if kind == "rate_limit":
+                rate_tries += 1
+                if rate_tries <= _RATE_LIMIT_RETRIES:
+                    if verbose:
+                        print(f"[reranker] rate limit on key #{idx + 1}/{len(keys)}; "
+                              f"waiting {_RATE_LIMIT_WAIT_S:.0f}s and retrying the same key.")
+                    time.sleep(_RATE_LIMIT_WAIT_S)
+                    continue
                 if verbose:
-                    print(f"[reranker] key #{state['idx'] + 1}/{len(keys)} depleted/"
-                          f"rejected; rotating to next key.")
-                state["idx"] += 1
-                continue  # try next key immediately
+                    print(f"[reranker] rate limit on key #{idx + 1}/{len(keys)} "
+                          "persists; leaving the key in place.")
+                return ""
+
+            if kind == "quota_auth":
+                retired = _retire_key(idx)
+                if verbose and retired:
+                    print(f"[reranker] key #{idx + 1}/{len(keys)} budget or "
+                          "credential rejected; rotating to next key.")
+                continue  # retry immediately on the current key
             return ""  # transient -> let score_pair_full retry the same key
 
         if verbose:
-            print("[reranker] all API keys exhausted; degrading (cosine-only).")
-        return ""
+            print(f"[reranker] all {len(keys)} API keys exhausted. "
+                  "Stopping so the run can resume after new keys are added.")
+        raise KeysExhausted(
+            f"All {len(keys)} API keys are exhausted. Replace LLM_API_KEY, "
+            "LLM_API_KEY_2, and LLM_API_KEY_3 in .env, then rerun to resume.")
 
     return _call
 
@@ -310,9 +390,13 @@ def score_pair_full(
     max_retries: int = 1,
     row_id: str | None = None,
     verbose: bool = True,
+    context_before: list[dict] | None = None,
+    context_after: list[dict] | None = None,
 ) -> tuple[float, str]:
     """Score a pair; retry once on parse failure; raise loudly if still bad."""
-    user = build_user_message(query, candidate)
+    user = build_user_message(
+        query, candidate,
+        context_before=context_before, context_after=context_after)
     last: Exception | None = None
     for attempt in range(max_retries + 1):
         text = caller(system_prompt, user, prompt_version)
@@ -630,15 +714,15 @@ def rerank_diagnostic(frames: dict, *, caller: Caller, system_prompt: str,
                       verbose: bool = True) -> dict:
     """Bi-encoder top-k vs LLM-reranked order on a dev sample (diagnostic)."""
     import random
-    from sentence_transformers import SentenceTransformer
     from src.biencoder_8 import (_encode, _split_ids, load_config as _bcfg,
+                                 load_sentence_transformer,
                                  verified_positive_corpus)
 
     bcfg = _bcfg()
     model_dir = _PROJECT_ROOT / bcfg["output"]["model_dir"]
     if not model_dir.exists():
         return {"skipped": "no fine-tuned bi-encoder"}
-    st = SentenceTransformer(str(model_dir), trust_remote_code=True, device="cpu")
+    st = load_sentence_transformer(model_dir, device="cpu")
     qp, dp = bcfg.get("query_prefix", ""), bcfg.get("document_prefix", "")
 
     corpus, pairs, negs, splits = (

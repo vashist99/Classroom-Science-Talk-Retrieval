@@ -1,9 +1,11 @@
 # Science-talk retrieval pipeline — Python dependencies.
-# Pinned to the versions validated in this environment (Python 3.12).
+# Installable on Python 3.14 (Windows). Original 3.12 pins are in comments
+# where a wheel did not exist for 3.14 (pandas 2.3.1, numpy 1.26.4, torch 2.5.1,
+# transformers 4.49.0). pytest: 392 passed, 1 skipped on 3.14.7.
 
 # Core data / numerics
-pandas==2.3.1
-numpy==1.26.4
+pandas==2.3.3          # was 2.3.1 (no cp314 wheel)
+numpy==2.5.3           # was 1.26.4 (no cp314 wheel)
 pyarrow>=14.0          # parquet engine
 openpyxl>=3.1          # xlsx read/write for review sheets
 
@@ -12,8 +14,8 @@ requests>=2.31
 python-dotenv>=1.0
 
 # Step 8 — bi-encoder fine-tuning (Track A)
-torch==2.5.1
-transformers==4.49.0
+torch==2.14.0          # was 2.5.1 (no cp314 wheel; this install is CPU-only)
+transformers==5.17.0   # was 4.49.0 (pulled by current torch/HF stack)
 sentence-transformers>=3.0
 einops>=0.8            # required by nomic-embed-text-v1.5 remote code
 wrapt>=1.16           # transitive (transformers.modeling_utils); missing on some envs

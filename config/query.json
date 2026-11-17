@@ -13,7 +13,7 @@
   "max_workers": 8,
   "per_phrase_wall_clock_cap_s": 60,
   "model_env": "LLM_MODEL_TRACKB",
-  "prompt_version": "reranker_v1",
+  "prompt_version": "reranker_v2",
   "smoke": {
     "_comment": "Capped dev eval for proof-of-correctness. n_pos/n_neg dev phrases each scored against top_k anchors.",
     "n_pos": 5,

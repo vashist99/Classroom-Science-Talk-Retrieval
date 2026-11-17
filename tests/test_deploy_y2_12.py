@@ -124,7 +124,7 @@ class FakePipe:
         self.ledger.hits = 0
         self.ledger.misses = 0
 
-    def classify(self, phrase, *, top_k=10):
+    def classify(self, phrase, *, top_k=10, context_before=None, context_after=None):
         # pretend each classify makes top_k new endpoint calls
         self.ledger.misses += top_k
         sci = "ice" in phrase.lower() or "plant" in phrase.lower()
@@ -195,9 +195,13 @@ def test_assign_label_llm_and_cosine():
     d12.assign_label(llm, cfg)
     assert llm["predicted_label"] == d12.LABEL_SCIENCE and llm["score"] == 0.95
 
-    cos = {"scored_by": "cosine", "llm_score": None, "cosine_score": 0.3}
+    low_llm = {"scored_by": "llm", "llm_score": 0.89, "cosine_score": 0.99}
+    d12.assign_label(low_llm, cfg)
+    assert low_llm["predicted_label"] == d12.LABEL_NOT and low_llm["score"] == 0.89
+
+    cos = {"scored_by": "cosine", "llm_score": None, "cosine_score": 0.95}
     d12.assign_label(cos, cfg)
-    assert cos["predicted_label"] == d12.LABEL_NOT and cos["score"] == 0.3
+    assert cos["predicted_label"] == d12.LABEL_NOT and cos["score"] == 0.95
 
 
 # ---------------------------------------------------------------------------
@@ -298,3 +302,75 @@ def test_config_loads():
     assert cfg["top_k"] == 10 and cfg["dollar_cap"] == 15.0
     assert cfg["speaker_keep"] == ["adult", "child"]
     assert cfg["science_only"] is True
+    assert cfg["output_dir"] == "reports/y2_scores_codebook_v2"
+    assert cfg["context_window"] == 2
+    assert cfg["pre_rerank_gate"] == "conservative_exact"
+
+
+def test_context_window_stays_inside_one_file():
+    recs = _records(["Look.", "What is the weather?", "Cloudy.", "Yes, rain clouds.", "Sit down."])
+    other = _records(["A different file."])
+    other[0]["source_file"] = "other.xlsx"
+    other[0]["line_no"] = 2
+    d12.attach_context_windows(recs + other, window=2)
+    cloudy = recs[2]
+    assert [t["utterance"] for t in cloudy["context_before"]] == [
+        "Look.", "What is the weather?"]
+    assert [t["utterance"] for t in cloudy["context_after"]] == [
+        "Yes, rain clouds.", "Sit down."]
+    assert other[0]["context_before"] == []
+    assert other[0]["context_after"] == []
+    # neighbors do not cross the file boundary
+    assert recs[0]["context_before"] == []
+    assert [t["utterance"] for t in recs[0]["context_after"]] == [
+        "What is the weather?", "Cloudy."]
+
+
+def test_conservative_gate_blocks_llm_and_science_label():
+    pipe = FakePipe()
+    recs = _records(["Look.", "the ice melted", "Two.", "Iguana."])
+    d12.cosine_score_all(pipe, recs, verbose=False)
+    d12.attach_context_windows(recs, window=2)
+    n_gated = d12.mark_conservative_gates(recs)
+    assert n_gated == 2
+    led = d12.budgeted_rerank(
+        pipe, recs, {"top_k": 10, "dollar_cap": 99, "cost_per_call": 0.0001},
+        verbose=False)
+    assert led["n_reranked"] == 2
+    by_text = {r["utterance"]: r for r in recs}
+    assert by_text["Look."]["scored_by"] == "cosine"
+    assert by_text["Two."]["scored_by"] == "cosine"
+    assert by_text["the ice melted"]["scored_by"] == "llm"
+    assert by_text["Iguana."]["scored_by"] == "llm"
+    cfg = {"llm_label_threshold": 0.9, "cosine_label_threshold": 0.4}
+    for r in recs:
+        d12.assign_label(r, cfg)
+    assert by_text["Look."]["predicted_label"] == d12.LABEL_NOT
+    assert by_text["Two."]["predicted_label"] == d12.LABEL_NOT
+    assert by_text["Look."]["scored_by"] == "gate"
+    assert by_text["Iguana."]["gated"] is False
+    assert by_text["Iguana."]["scored_by"] == "llm"
+
+
+def test_science_sheet_keeps_llm_rows_in_line_order(tmp_path):
+    recs = [
+        _scored_record("Look.", "170", "b.xlsx", 5, d12.LABEL_SCIENCE, score=0.99),
+        _scored_record("The ice melted.", "170", "b.xlsx", 2, d12.LABEL_SCIENCE, score=0.55),
+        _scored_record("Two.", "170", "b.xlsx", 9, d12.LABEL_SCIENCE, score=0.8),
+        _scored_record("Iguana.", "170", "b.xlsx", 7, d12.LABEL_SCIENCE, score=0.5),
+        _scored_record("A high cosine only.", "170", "b.xlsx", 4, d12.LABEL_SCIENCE, score=0.99),
+    ]
+    recs[1]["scored_by"] = "llm"
+    recs[1]["llm_score"] = 0.95
+    recs[3]["scored_by"] = "llm"
+    recs[3]["llm_score"] = 0.91
+    d12.mark_conservative_gates(recs)
+    cfg = {"output_dir": str(tmp_path), "science_only": True,
+           "llm_label_threshold": 0.9, "cosine_label_threshold": 0.4}
+    for r in recs:
+        d12.assign_label(r, cfg)
+    out = d12.write_classroom_workbook("Classroom74_110525", recs, cfg, verbose=False)
+    data = _data_rows(pd.ExcelFile(out), "child_170")
+    assert list(data["line_no"]) == [2, 7]
+    assert list(data["utterance"]) == ["The ice melted.", "Iguana."]
+    assert set(data["scored_by"]) == {"llm"}

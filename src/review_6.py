@@ -11,7 +11,7 @@ Workflow
 
        python src/review_6.py --export
 
-   -> data/processed/review_samples/review_queue.xlsx (+ .parquet mirror)
+   -> data/processed/review_samples/review_queue_6.xlsx (+ .parquet mirror)
 
 2. Human fills three columns per row in the xlsx:
        decision        accept | reject | edit          (required)
@@ -21,7 +21,7 @@ Workflow
 
 3. Apply the filled template:
 
-       python src/review_6.py --apply data/processed/review_samples/review_queue.xlsx --reviewer "DH"
+       python src/review_6.py --apply data/processed/review_samples/review_queue_6.xlsx --reviewer "DH"
 
    Decisions land in BOTH:
        - data/processed/review_decisions.parquet   (sidecar, source of truth --
@@ -86,6 +86,7 @@ DECISION_COLUMNS = (
 
 SIDECAR_NAME = "review_decisions.parquet"
 QUEUE_BASENAME = "review_queue"
+QUEUE_XLSX_NAME = "review_queue_6.xlsx"
 
 DEFAULT_SPOT_RATE = 0.12  # plan: ~10-15%
 
@@ -236,7 +237,7 @@ def export_review_queue(
         return None
 
     pq = rd / f"{QUEUE_BASENAME}.parquet"
-    xl = rd / f"{QUEUE_BASENAME}.xlsx"
+    xl = rd / QUEUE_XLSX_NAME
     queue.to_parquet(pq, index=False)
     try:
         queue.to_excel(xl, index=False)
