@@ -1,0 +1,58 @@
+You judge whether two early-childhood classroom lines show the same scientific practice. The rubric is binding. Looking like science, sharing a word, or echoing Phrase A does not qualify Phrase B.
+
+Phrase A is a known science line. Phrase B is the classroom line to interpret. Neighboring lines, when provided, explain Phrase B only. Judge the pair. Leave the neighbors unscored.
+
+BINDING DEFINITION
+Science talk builds understanding of scientific phenomena through science ideas, vocabulary, and scientific practices. Phrase B counts only if it takes Route A, Route B, or both.
+
+Route A, science content: it communicates, asks for, labels, or discusses facts, concepts, categories, properties, structures, functions, or processes of the natural or physical world (living things, the human body, plants, animals, ecology, weather, Earth and space, materials, states of matter, motion, forces, energy, change, how objects work).
+
+Route B, science practice: it does scientific sensemaking about a natural or physical phenomenon or a functional design problem (observe or describe, compare or classify, predict, test or manipulate, explain why or how, measure, use evidence or results).
+
+A line may do both. A word that merely sounds scientific is not sufficient. Read all of Phrase B, and use the supplied neighbors when they are there.
+
+BINDING CONTENT SCOPE
+Scientific meaning has to sit in one of these domains:
+
+- Life science: living or nonliving, animals, plants, life cycles, body structures and functions, senses, habitats, predator and prey, adaptation, growth, factual nutrition or health.
+- Physical science: motion, push and pull, force, gravity, magnets, materials and properties, solid and liquid, melting and freezing, heat, energy, light or sound as phenomena.
+- Earth and space: weather, clouds, rain, temperature, seasons, rocks, volcanoes and lava, Earth, sun and moon, planets, comets, space.
+- Environment and ecology: habitats, food relationships, pollination, insects and plants, environmental roles, recycling as an environmental process.
+- Engineering and design: how a structure or device works, or designing, building, testing, or revising one. Block play by itself is outside this scope.
+
+APPLY THE RUBRIC EXACTLY
+- Phrase B outside Route A and Route B, or outside the scope, scores near 0 even if Phrase A is strong science or the words look alike.
+- A short Phrase B can qualify when the neighbors make the scientific meaning plain. Neighbors that show management, a toy or character, shapes or colors as the lesson, rote counting, or casual talk keep Phrase B out.
+- Do not supply a science target the line and its neighbors do not support.
+- Score high only when both lines share one scientific practice and Phrase B meets the definition.
+
+Subtype notes, subordinate to the rubric:
+{operational_definitions}
+
+SCORES
+- near 1.0 when both lines share one scientific practice and Phrase B meets the definition.
+- near 0.5 when Phrase B is genuinely ambiguous or the overlap is weak.
+- near 0.0 when Phrase B fails the definition.
+
+EXAMPLES
+1) A: "What do you notice about the ice as it sits in the warm water?"
+   B: "Look closely -- tell me what's happening to the ice cube."
+   -> {"score": 0.95, "rationale": "both request observation of melting ice"}
+2) A: "Why do you think the tower fell down?"
+   B: "How come the blocks tumbled when you pushed them?"
+   -> {"score": 0.9, "rationale": "both ask for a cause of the fall"}
+3) A: "What will happen if we add more water to the soil?"
+   B: "Friends, please put your shoes on and line up at the door."
+   -> {"score": 0.05, "rationale": "B manages the class and fails the rubric"}
+4) Before: adult: What is the weather today?
+   A: "Is it cloudy outside?"
+   B: "Cloudy."
+   After: adult: Yes. Those are rain clouds.
+   -> {"score": 0.9, "rationale": "B answers a weather question with a weather state"}
+5) A: "What do you notice about the ice?"
+   B: "Look."
+   Before: adult: Sit down please.
+   -> {"score": 0.05, "rationale": "B only directs attention and has no science target"}
+
+Respond with exactly one JSON object on a single line and nothing else:
+{"score": <float 0..1>, "rationale": "<=25 words"}

@@ -127,7 +127,7 @@ class TestExportReviewQueue:
         _write_parquets(tmp_path)
         path = r6.export_review_queue(tmp_path, verbose=False)
         assert path is not None and path.exists()
-        assert (tmp_path / "review_samples" / "review_queue.xlsx").exists()
+        assert (tmp_path / "review_samples" / "review_queue_6.xlsx").exists()
 
     def test_empty_queue_returns_none(self, tmp_path):
         _write_parquets(

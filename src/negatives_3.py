@@ -902,7 +902,7 @@ def compute_review_pass_rate(df_neg: pd.DataFrame) -> dict:
 # ---------------------------------------------------------------------------
 
 NEG_REVIEW_LABELS = ("NOT_SCIENCE_TALK", "POSSIBLE_LEAK", "UNCLEAR")
-NEG_REVIEW_FILENAME = "negatives_review.xlsx"
+NEG_REVIEW_FILENAME = "negatives_review_3.xlsx"
 
 
 def validate_negatives_review(df: pd.DataFrame) -> pd.DataFrame:

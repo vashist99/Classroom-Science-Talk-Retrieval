@@ -7,8 +7,16 @@ file), sortable for human review.
 Two-stage, budget-bounded:
   1. Bi-encoder cosine scores EVERY kept utterance (local, free) -> a
      science-similarity `cosine_score`, `top_match_in_corpus`, `predicted_subtype`.
-  2. gpt-oss-120b re-ranks only the highest-cosine utterances, under a hard
-     dollar cap tracked by a live cost ledger that stops before the limit.
+  2. Exact look / count / shape-color lines are gated out (science-name
+     hold-out kept) and are not sent to the LLM or labeled SCIENCE_TALK.
+  3. gpt-oss-120b re-ranks the remaining highest-cosine utterances, under a
+     hard dollar cap. Each call includes two kept lines before and two after
+     the target, from the same transcript file. The bi-encoder still sees
+     the target line alone.
+
+Workbooks go to reports/y2_scores_codebook_v2. Classrooms stay in sorted
+folder-name order (the previous Y2 run order). Within a child sheet, rows
+stay in transcript line_no order.
 
 Full LLM re-ranking of all ~1.3M utterances is intentionally NOT attempted
 (~$2.6k); cosine gives full coverage and the budget is spent where science is.
@@ -178,6 +186,46 @@ def cosine_score_all(pipe, records: list[dict], *, batch_size: int = 64,
 
 
 # ---------------------------------------------------------------------------
+# Context window + conservative pre-rerank gate
+# ---------------------------------------------------------------------------
+
+def attach_context_windows(records: list[dict], *, window: int = 2) -> None:
+    """Attach up to `window` kept lines before and after each utterance.
+
+    Neighbors come from the same source file, in transcript line order.
+    Gated lines stay in the window: they are real turns, just not targets.
+    """
+    by_file: dict[str, list[dict]] = {}
+    for rec in records:
+        by_file.setdefault(rec["source_file"], []).append(rec)
+    for rows in by_file.values():
+        rows.sort(key=lambda r: r["line_no"])
+        for i, rec in enumerate(rows):
+            before = rows[max(0, i - window):i]
+            after = rows[i + 1:i + 1 + window]
+            rec["context_before"] = [
+                {"speaker": r["speaker"], "utterance": r["utterance"]} for r in before]
+            rec["context_after"] = [
+                {"speaker": r["speaker"], "utterance": r["utterance"]} for r in after]
+
+
+def mark_conservative_gates(records: list[dict]) -> int:
+    """Flag exact look / count / shape-color lines, sparing science-name hold-outs.
+
+    Returns the number flagged. Does not drop the rows from `records`.
+    """
+    from error_analysis.codebook import gate_flags
+
+    n = 0
+    for rec in records:
+        flagged = bool(gate_flags(rec["utterance"])["conservative_exact"])
+        rec["gated"] = flagged
+        if flagged:
+            n += 1
+    return n
+
+
+# ---------------------------------------------------------------------------
 # Stage 2 — budgeted LLM re-rank
 # ---------------------------------------------------------------------------
 
@@ -204,6 +252,8 @@ def budgeted_rerank(pipe, records: list[dict], cfg: dict, *,
     misses_before = pipe.ledger.misses
     n_reranked, cap_hit = 0, False
     for r in order:
+        if r.get("gated"):
+            continue
         if max_rerank is not None and n_reranked >= max_rerank:
             cap_hit = True
             break
@@ -211,7 +261,10 @@ def budgeted_rerank(pipe, records: list[dict], cfg: dict, *,
         if max_rerank is None and pipe.ledger.misses + top_k > max_calls:
             cap_hit = True
             break
-        res = pipe.classify(r["utterance"], top_k=top_k)
+        res = pipe.classify(
+            r["utterance"], top_k=top_k,
+            context_before=r.get("context_before"),
+            context_after=r.get("context_after"))
         top = res["ranked_candidates"][0] if res["ranked_candidates"] else {}
         r["llm_score"] = res["score"]
         r["degraded"] = res["degraded"]
@@ -236,17 +289,26 @@ def budgeted_rerank(pipe, records: list[dict], cfg: dict, *,
 
 
 def assign_label(rec: dict, cfg: dict) -> None:
-    """Predicted label + a unified display `score` (in place)."""
+    """Predicted label + a unified display `score` (in place).
+
+    SCIENCE_TALK requires an LLM score at or above the LLM threshold.
+    Cosine-only rows stay NOT_SCIENCE_TALK, so a science-only sheet
+    contains only LLM decisions.
+    """
+    if rec.get("gated"):
+        rec["scored_by"] = "gate"
+        rec["predicted_label"] = LABEL_NOT
+        rec["score"] = float(rec.get("cosine_score") or 0.0)
+        rec["llm_score"] = None
+        return
     if rec.get("scored_by") == "llm" and rec.get("llm_score") is not None:
-        score = rec["llm_score"]
+        score = float(rec["llm_score"])
         rec["predicted_label"] = (LABEL_SCIENCE
                                   if score >= cfg.get("llm_label_threshold", 0.9)
                                   else LABEL_NOT)
     else:
-        score = rec["cosine_score"]
-        rec["predicted_label"] = (LABEL_SCIENCE
-                                  if score >= cfg.get("cosine_label_threshold", 0.4)
-                                  else LABEL_NOT)
+        score = float(rec.get("cosine_score") or 0.0)
+        rec["predicted_label"] = LABEL_NOT
     rec["score"] = float(score)
 
 
@@ -268,8 +330,8 @@ def _build_instructions(science_only: bool) -> list[list[str]]:
         ["Each sheet is one child's point-of-view recorder for this classroom session."],
     ]
     if science_only:
-        lines.append(["Sheets contain ONLY utterances the model labeled SCIENCE_TALK "
-                      "(non-science rows were filtered out)."])
+        lines.append(        ["Sheets contain ONLY utterances gpt-oss scored at or above the LLM "
+                      "threshold. Cosine-only rows are not included."])
     else:
         lines.append(["One row per spoken utterance (kept rows: adult/child speech "
                       "above the confidence floor)."])
@@ -284,6 +346,10 @@ def _build_instructions(science_only: bool) -> list[list[str]]:
         ["  llm_score        : gpt-oss-120b judgment (only for the top science candidates)."],
         ["  top_match_in_corpus : the most similar known science utterance."],
         ["  rationale        : the model's short justification (llm rows only)."],
+        [""],
+        ["Removed before labeling: exact 'look' lines, exact counting or 'how many',"],
+        ["and exact shape or color lines, unless the line is a science-content name"],
+        ["(for example Iguana or Habitat). Those lines are not in these sheets."],
         [""],
         ["How to review:"],
         ["  1. Sort a sheet by 'score' descending to see the strongest science talk first."],
@@ -454,7 +520,8 @@ def run(
 
     per_folder_report: list[dict] = []
     out_paths: list[str] = []
-    totals = {"n_utterances": 0, "n_science": 0, "done": 0, "skipped": 0}
+    totals = {"n_utterances": 0, "n_science": 0, "n_gated": 0, "done": 0, "skipped": 0}
+    keys_exhausted = {"hit": False, "folder": None}
 
     def _write_manifest() -> dict:
         manifest = {
@@ -465,10 +532,16 @@ def run(
             "n_folders_done": totals["done"], "n_folders_skipped": totals["skipped"],
             "n_utterances": totals["n_utterances"],
             "n_predicted_science": totals["n_science"],
+            "n_gated": totals["n_gated"],
+            "context_window": cfg.get("context_window", 2),
+            "pre_rerank_gate": cfg.get("pre_rerank_gate", "conservative_exact"),
+            "output_dir": str(out_dir),
             "cumulative_new_calls": pipe.ledger.misses,
             "cumulative_dollars": round(pipe.ledger.misses * cost, 4),
             "cached_calls": pipe.ledger.hits,
             "cap_reached": pipe.ledger.misses * cost >= dollar_cap - cost,
+            "keys_exhausted": keys_exhausted["hit"],
+            "keys_exhausted_during": keys_exhausted["folder"],
             "per_folder": per_folder_report,
             "workbooks": out_paths,
         }
@@ -499,16 +572,35 @@ def run(
             print(f"  [{k + 1}/{len(targets)}] {folder.name}: {len(recs)} utterances")
 
         cosine_score_all(pipe, recs, verbose=verbose)
+        attach_context_windows(recs, window=int(cfg.get("context_window", 2)))
+        n_gated = mark_conservative_gates(recs)
 
-        if use_stub:
-            led = budgeted_rerank(pipe, recs, cfg, max_rerank=30, reset=False,
-                                  verbose=verbose)
-        else:
-            # cumulative allowance grows by one share per folder, capped at the
-            # total; unused budget from quiet folders rolls forward.
-            allowance = min(dollar_cap, (k + 1) * share)
-            led = budgeted_rerank(pipe, recs, cfg, dollar_budget=allowance,
-                                  reset=False, verbose=verbose)
+        try:
+            if use_stub:
+                led = budgeted_rerank(pipe, recs, cfg, max_rerank=30, reset=False,
+                                      verbose=verbose)
+            else:
+                # cumulative allowance grows by one share per folder, capped at the
+                # total; unused budget from quiet folders rolls forward.
+                allowance = min(dollar_cap, (k + 1) * share)
+                led = budgeted_rerank(pipe, recs, cfg, dollar_budget=allowance,
+                                      reset=False, verbose=verbose)
+        except r9.KeysExhausted:
+            # Do not write this folder. Finished workbooks stay, and the
+            # in-progress classroom is retried on resume (cached calls are free).
+            keys_exhausted["hit"] = True
+            keys_exhausted["folder"] = folder.name
+            if verbose:
+                print(
+                    f"\nAll API keys are exhausted during {folder.name}. "
+                    "That workbook was not saved. Finished classrooms are kept.\n"
+                    "Replace the three keys in .env (LLM_API_KEY, LLM_API_KEY_2, "
+                    "LLM_API_KEY_3), then rerun the same command to resume."
+                )
+            manifest = _write_manifest()
+            if verbose:
+                _print_summary(manifest)
+            return manifest
 
         for r in recs:
             assign_label(r, cfg)
@@ -520,9 +612,11 @@ def run(
         n_sci = sum(1 for r in recs if r["predicted_label"] == LABEL_SCIENCE)
         totals["n_utterances"] += len(recs)
         totals["n_science"] += n_sci
+        totals["n_gated"] += n_gated
         totals["done"] += 1
         per_folder_report.append({
             "folder": folder.name, "utterances": len(recs),
+            "gated": n_gated,
             "predicted_science": n_sci, "reranked": led["n_reranked"],
             "new_calls": led["new_calls"], "dollars_this_folder": led["dollars_spent"],
             "cumulative_dollars": led["cumulative_dollars"],
@@ -546,8 +640,8 @@ def _print_summary(m: dict) -> None:
     print("\n=== Step 12 Y2 scoring ===")
     print(f"  folders done: {m['n_folders_done']} | skipped: "
           f"{m['n_folders_skipped']} / selected {m['n_folders_selected']}")
-    print(f"  utterances: {m['n_utterances']} | predicted science: "
-          f"{m['n_predicted_science']} "
+    print(f"  utterances: {m['n_utterances']} | gated: {m.get('n_gated', 0)} | "
+          f"predicted science: {m['n_predicted_science']} "
           f"({m['n_predicted_science'] / max(m['n_utterances'], 1):.1%})")
     print(f"  LLM spend: {m['cumulative_new_calls']} new calls | "
           f"${m['cumulative_dollars']} (cap ${m['dollar_cap']}, "

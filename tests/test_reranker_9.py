@@ -8,6 +8,8 @@ real gpt-oss-120b path is exercised separately via `python src/reranker_9.py
 from __future__ import annotations
 
 import json
+import re
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -156,6 +158,36 @@ def test_stub_caller_roundtrips_through_parser():
     assert 0.0 <= s <= 1.0
 
 
+def test_user_message_context_marks_phrase_b_and_keeps_pair_quotes_first():
+    user = r9.build_user_message(
+        "Is it cloudy outside?",
+        "Cloudy.",
+        context_before=[{"speaker": "adult", "utterance": "What is the weather?"}],
+        context_after=[{"speaker": "adult", "utterance": "Yes. Rain clouds."}],
+    )
+    assert user.index('Phrase A (query): "Is it cloudy outside?"') < user.index("Before:")
+    assert 'Phrase B (candidate): "Cloudy."' in user
+    assert "- adult: What is the weather?" in user
+    assert "- adult: Yes. Rain clouds." in user
+    assert "Do not score these lines." in user
+    phrases = re.findall(r'"([^"]*)"', user)
+    assert phrases[:2] == ["Is it cloudy outside?", "Cloudy."]
+
+
+def test_active_prompt_contains_codebook_rubric():
+    cfg = r9.load_config()
+    text = Path(r9._PROJECT_ROOT / cfg["prompt_file"]).read_text(encoding="utf-8")
+    assert cfg["prompt_version"] == "reranker_v2"
+    assert "OPERATIONAL DEFINITION OF SCIENCE TALK" in text
+    assert "Science content talk" in text
+    assert "Science practice talk" in text
+    assert "SCOPE OF SCIENCE CONTENT" in text
+    assert "Life science" in text
+    assert "Engineering and design" in text
+    assert "Follow the rubric below strictly" in text
+    assert "{operational_definitions}" in text
+
+
 def test_call_ledger_counts_miss_for_novel_params():
     led = r9.CallLedger()
     led.classify(model="no-such-model-xyz",
@@ -291,7 +323,11 @@ def test_response_kind():
     ok = {"choices": [{"message": {"content": '{"score":0.9}'}}]}
     assert r9._response_kind(ok) == "ok"
     assert r9._response_kind({"error": {"message": "monthly budget exceeded"}}) == "quota_auth"
-    assert r9._response_kind({"error": {"message": "rate limited, slow down"}}) == "transient"
+    assert r9._response_kind({"error": {"message": "invalid api key"}}) == "quota_auth"
+    assert r9._response_kind({"error": {"message": "rate limited, slow down"}}) == "rate_limit"
+    assert r9._response_kind({"error": {"message": "rate limit exceeded"}}) == "rate_limit"
+    assert r9._response_kind(
+        {"error": {"message": "maximum context length exceeded"}}) == "transient"
     assert r9._response_kind({"choices": [{"message": {"content": ""}}]}) == "transient"
 
 
@@ -325,6 +361,77 @@ def test_make_real_caller_rotates_on_quota(monkeypatch):
     out2 = caller("sys2", "usr2", "reranker_v1")
     assert json.loads(out2)["score"] == 0.91
     assert used == ["k1", "k2", "k2"]
+
+
+def test_make_real_caller_raises_when_every_key_is_exhausted(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "k1")
+    monkeypatch.setenv("LLM_API_KEY_2", "k2")
+    monkeypatch.setenv("LLM_API_KEY_3", "k3")
+    monkeypatch.setenv("COMPLETION_URL", "http://example.test/v1")
+
+    used = []
+
+    def fake_cached_request(*, api_key, url, endpoint, model, params, prompt_version):
+        used.append(api_key)
+        return {"error": {"message": "monthly budget exceeded"}}
+
+    monkeypatch.setattr("src.llm_client_0.cached_request", fake_cached_request)
+    caller = r9.make_real_caller("gpt", ledger=None, verbose=False)
+    with pytest.raises(r9.KeysExhausted):
+        caller("sys", "usr", "reranker_v2")
+    assert used == ["k1", "k2", "k3"]
+
+
+def test_rate_limit_retries_same_key(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "k1")
+    monkeypatch.setenv("LLM_API_KEY_2", "k2")
+    monkeypatch.delenv("LLM_API_KEY_3", raising=False)
+    monkeypatch.setenv("COMPLETION_URL", "http://example.test/v1")
+    monkeypatch.setattr(r9.time, "sleep", lambda _s: None)
+
+    used = []
+
+    def fake_cached_request(*, api_key, url, endpoint, model, params, prompt_version):
+        used.append(api_key)
+        if len(used) == 1:
+            return {"error": {"message": "rate limit exceeded"}}
+        return _good_body()
+
+    monkeypatch.setattr("src.llm_client_0.cached_request", fake_cached_request)
+    caller = r9.make_real_caller("gpt", ledger=None, verbose=False)
+    out = caller("sys", "usr", "reranker_v2")
+    assert json.loads(out)["score"] == 0.91
+    assert used == ["k1", "k1"]
+
+
+def test_parallel_budget_errors_retire_a_key_once(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "k1")
+    monkeypatch.setenv("LLM_API_KEY_2", "k2")
+    monkeypatch.setenv("LLM_API_KEY_3", "k3")
+    monkeypatch.setenv("COMPLETION_URL", "http://example.test/v1")
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    used = []
+    used_lock = threading.Lock()
+    barrier = threading.Barrier(8)
+
+    def fake_cached_request(*, api_key, url, endpoint, model, params, prompt_version):
+        with used_lock:
+            used.append(api_key)
+        if api_key == "k1":
+            barrier.wait(timeout=5)
+            return {"error": {"message": "monthly budget exceeded"}}
+        return _good_body()
+
+    monkeypatch.setattr("src.llm_client_0.cached_request", fake_cached_request)
+    caller = r9.make_real_caller("gpt", ledger=None, verbose=False)
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        outs = list(ex.map(lambda i: caller("sys", f"u{i}", "v"), range(8)))
+    assert [json.loads(o)["score"] for o in outs] == [0.91] * 8
+    assert used.count("k1") == 8
+    assert used.count("k2") == 8
+    assert "k3" not in used
 
 
 def test_make_real_caller_transient_does_not_rotate(monkeypatch):

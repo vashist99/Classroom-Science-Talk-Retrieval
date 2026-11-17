@@ -98,6 +98,37 @@ def test_retrieve_respects_top_k():
 # classify — happy path
 # ---------------------------------------------------------------------------
 
+def test_classify_stops_when_api_keys_are_exhausted():
+    import src.reranker_9 as r9
+
+    def boom(system, user, prompt_version):
+        raise r9.KeysExhausted("all keys spent")
+
+    pipe = _make_pipe(boom, top_k=1)
+    with pytest.raises(r9.KeysExhausted):
+        pipe.classify("Cloudy.")
+
+
+def test_classify_passes_context_into_the_pair_prompt():
+    seen = {}
+
+    def capture(system, user, prompt_version):
+        seen["user"] = user
+        return json.dumps({"score": 0.4, "rationale": "ctx"})
+
+    pipe = _make_pipe(capture, top_k=1)
+    pipe.classify(
+        "Cloudy.",
+        context_before=[{"speaker": "adult", "utterance": "What is the weather?"}],
+        context_after=[{"speaker": "child", "utterance": "Rain."}],
+    )
+    assert 'Phrase A (query): "we counted blocks"' in seen["user"]
+    assert 'Phrase B (candidate): "Cloudy."' in seen["user"]
+    assert seen["user"].index("Phrase B") < seen["user"].index("Before:")
+    assert "- adult: What is the weather?" in seen["user"]
+    assert "- child: Rain." in seen["user"]
+
+
 def test_classify_science_label_and_max_score():
     pipe = _make_pipe(_caller_by_keyword, threshold=0.5)
     res = pipe.classify("why did the ice disappear")
@@ -176,10 +207,11 @@ def test_partial_parse_failure_does_not_degrade():
     import re
 
     def flaky(system, user, pv):
-        # key off the CANDIDATE (Phrase B), not the whole message
-        m = re.search(r'Phrase B \(candidate\): "([^"]*)"', user)
-        cand = (m.group(1) if m else "").lower()
-        if "ice" in cand:  # this one candidate is always unparsable
+        # Phrase A is the corpus anchor and varies per pair. Phrase B is the
+        # classroom line and is the same on every call.
+        m = re.search(r'Phrase A \(query\): "([^"]*)"', user)
+        anchor = (m.group(1) if m else "").lower()
+        if "ice" in anchor:
             return "garbage"
         return json.dumps({"score": 0.3, "rationale": "ok"})
 

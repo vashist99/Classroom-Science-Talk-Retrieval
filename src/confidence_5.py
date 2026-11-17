@@ -32,7 +32,8 @@ DoD addressed by this module:
   2. Thresholds and band edges are loaded from `config/confidence.json` --
      never hard-coded.
   3. A stratified 50-row audit template is written to
-     `data/processed/review_samples/routing_audit_template.parquet` for the
+     `data/processed/review_samples/routing_audit_template.parquet` (+
+     `routing_audit_template_5.xlsx`) for the
      50-pair human audit (see notebook cell + this module's docstring).
   4. Re-runnable: drops & recomputes confidence/routing on every run.
 """
@@ -55,6 +56,9 @@ from src.data_loader_1 import DEFAULT_PROCESSED_DIR
 
 
 DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "config" / "confidence.json"
+ROUTING_AUDIT_TEMPLATE_XLSX = "routing_audit_template_5.xlsx"
+ROUTING_AUDIT_SCORED_XLSX = "routing_audit_scored_5.xlsx"
+ROUTING_AUDIT_DISAGREEMENTS_XLSX = "routing_audit_disagreements_5.xlsx"
 
 
 # ---------- config ----------------------------------------------------------
@@ -338,7 +342,7 @@ def export_routing_audit_sample(
     sampled.to_parquet(path, index=False)
     # Also dump an Excel mirror so the user can open it directly.
     try:
-        sampled.to_excel(rd / "routing_audit_template.xlsx", index=False)
+        sampled.to_excel(rd / ROUTING_AUDIT_TEMPLATE_XLSX, index=False)
     except Exception as e:
         if verbose:
             print(f"  (could not also write xlsx mirror: {e})")
@@ -508,9 +512,9 @@ def score_routing_audit(
     """Score a filled routing audit and write scored artifacts.
 
     Reads `audit_path` (xlsx or parquet), fills the `agree` column, writes:
-      - routing_audit_scored.xlsx / .parquet  (full frame with agree)
+      - routing_audit_scored.parquet / routing_audit_scored_5.xlsx
       - routing_audit_report.json             (summary metrics)
-      - routing_audit_disagreements.xlsx        (rows where model != human)
+      - routing_audit_disagreements_5.xlsx      (rows where model != human)
 
     Returns the report dict from `compute_audit_agreement`, plus paths written.
     """
@@ -555,9 +559,9 @@ def score_routing_audit(
     report["refresh_routing"] = refresh_routing
 
     scored_parquet = out_dir / "routing_audit_scored.parquet"
-    scored_xlsx = out_dir / "routing_audit_scored.xlsx"
+    scored_xlsx = out_dir / ROUTING_AUDIT_SCORED_XLSX
     report_json = out_dir / "routing_audit_report.json"
-    disagreements_xlsx = out_dir / "routing_audit_disagreements.xlsx"
+    disagreements_xlsx = out_dir / ROUTING_AUDIT_DISAGREEMENTS_XLSX
 
     df.to_parquet(scored_parquet, index=False)
     df.to_excel(scored_xlsx, index=False)
@@ -691,7 +695,7 @@ def _parse_args() -> argparse.Namespace:
         help="Score a filled routing audit (xlsx or parquet) and write "
              "routing_audit_scored.* + routing_audit_report.json. "
              "Default input if omitted when using --score-audit-only: "
-             "review_samples/routing_audit_template.xlsx",
+             "review_samples/routing_audit_template_5.xlsx",
     )
     p.add_argument(
         "--score-audit-only", action="store_true",
@@ -722,7 +726,7 @@ if __name__ == "__main__":
     elif args.score_audit_only or args.score_audit is not None:
         audit_path = args.score_audit
         if audit_path is None:
-            audit_path = args.processed_dir / "review_samples" / "routing_audit_template.xlsx"
+            audit_path = args.processed_dir / "review_samples" / ROUTING_AUDIT_TEMPLATE_XLSX
         score_routing_audit(
             audit_path,
             config_path=args.config,

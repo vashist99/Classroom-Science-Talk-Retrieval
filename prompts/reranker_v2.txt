@@ -1,0 +1,65 @@
+You rate whether two classroom utterances express the same scientific practice. Follow the rubric below strictly. A science-sounding word, a shared topic word, or a resemblance between the phrases is not enough on its own.
+
+You will be given Phrase A (a known science utterance) and Phrase B (a classroom utterance). You may also be given the classroom lines immediately before and after Phrase B. Use those lines only to decide what Phrase B means. Score Phrase A and Phrase B together as a pair. Do not score the neighboring lines.
+
+OPERATIONAL DEFINITION OF SCIENCE TALK (binding)
+Science talk is language that builds understanding of scientific phenomena through science ideas, vocabulary, and scientific practices. Phrase B is science talk only when it meets either or both of these routes:
+
+A. Science content talk: communicates, requests, labels, or discusses information, facts, concepts, categories, properties, structures, functions, or processes about the natural or physical world. Typical targets include living things, the human body, plants, animals, ecology, weather, Earth and space, materials, states of matter, motion, forces, energy, change, and how objects work.
+
+B. Science practice talk: engages in scientific sensemaking about a natural or physical phenomenon or a functional design problem. Practices include observing or describing, comparing or classifying, predicting, testing or manipulating, explaining why or how, measuring, and using evidence or results.
+
+The two routes are not mutually exclusive. One utterance may contain both. Words that sound like science content alone are not enough. Judge the whole of Phrase B, using the supplied neighboring lines when they are present.
+
+SCOPE OF SCIENCE CONTENT (binding)
+Count Phrase B as science content only when it is genuinely conveying or eliciting scientific meaning inside one of these domains:
+
+- Life science: living and nonliving; animals; plants; life cycles; body structures and functions; senses; habitats; predator and prey; adaptation; growth; nutrition or health when treated factually.
+- Physical science: motion; push and pull; force; gravity; magnets; materials and properties; solid and liquid; melting and freezing; heat; energy; light or sound when treated as phenomena.
+- Earth and space science: weather; clouds; rain; temperature; seasons; rocks; volcanoes and lava; Earth; sun and moon; planets; comets; space.
+- Environmental and ecological science: habitats; food relationships; pollination; insects and plants; environmental roles; recycling when discussed as an environmental process.
+- Engineering and design: how objects or structures work; designing, building, testing, or revising a functional structure or device. Children merely playing with blocks is not science.
+
+STRICT APPLICATION
+- Apply this definition and this content scope exactly.
+- If Phrase B does not meet Route A or Route B inside that scope, score near 0, even when Phrase A is clear science and even when the wording looks similar.
+- A short Phrase B can meet the definition when the supplied neighboring lines make its scientific meaning clear. If those lines show management, a toy or character, a shape or color lesson, rote counting, or casual talk, Phrase B does not meet the definition.
+- Do not invent a science target that Phrase B and the supplied lines do not support.
+- A high score requires both phrases to express the same scientific practice, and Phrase B must itself meet the definition above.
+
+PRACTICE SUBTYPES (guardrails only; they do not override the rubric):
+{operational_definitions}
+
+SCORING
+- near 1.0 = both phrases clearly express the same scientific practice, and Phrase B meets the operational definition.
+- about 0.5 = Phrase B is ambiguous under the rubric, or the shared science is only partial.
+- near 0.0 = Phrase B does not meet the operational definition, so the pair does not share scientific practice.
+
+EXAMPLES
+1) Clear positive:
+   A: "What do you notice about the ice as it sits in the warm water?"
+   B: "Look closely -- tell me what's happening to the ice cube."
+   -> {"score": 0.95, "rationale": "both ask for observation of melting ice"}
+2) Informal positive:
+   A: "Why do you think the tower fell down?"
+   B: "How come the blocks tumbled when you pushed them?"
+   -> {"score": 0.9, "rationale": "both ask why a structure fell after a push"}
+3) Rubric failure:
+   A: "What will happen if we add more water to the soil?"
+   B: "Friends, please put your shoes on and line up at the door."
+   -> {"score": 0.05, "rationale": "B is management and does not meet the definition"}
+4) Context makes a short answer science:
+   Before: adult: What is the weather today?
+   A: "Is it cloudy outside?"
+   B: "Cloudy."
+   After: adult: Yes. Those are rain clouds.
+   -> {"score": 0.9, "rationale": "B names a weather condition in a weather exchange"}
+5) Similar wording is not enough:
+   A: "What do you notice about the ice?"
+   B: "Look."
+   Before: adult: Sit down please.
+   -> {"score": 0.05, "rationale": "B is a bare look with no science target"}
+
+OUTPUT
+Return ONLY a single JSON object on one line, no prose before or after:
+{"score": <float 0..1>, "rationale": "<=25 words"}

@@ -336,13 +336,56 @@ def evaluate_model(model, eval_data: dict, config: dict) -> dict:
 # Model load / train / embed
 # ---------------------------------------------------------------------------
 
-def load_base_model(config: dict):
-    """Load the base SentenceTransformer (warm start / frozen baseline)."""
+def ensure_nomic_transformers5_compat() -> None:
+    """Restore PreTrainedModel.get_extended_attention_mask on transformers 5.
+
+    nomic-embed-text-v1.5 still loads via trust_remote_code from
+    nomic-ai/nomic-bert-2048, whose forward() calls this transformers-4 method.
+    transformers 5 removed it (native nomic_bert uses create_bidirectional_mask
+    instead), which otherwise crashes encode() with:
+
+        AttributeError: 'NomicBertModel' object has no attribute
+        'get_extended_attention_mask'
+    """
+    import torch
+    from transformers import PreTrainedModel
+
+    if hasattr(PreTrainedModel, "get_extended_attention_mask"):
+        return
+
+    def get_extended_attention_mask(self, attention_mask, input_shape,
+                                    device=None, dtype=None):
+        if dtype is None:
+            dtype = getattr(self, "dtype", torch.float32)
+        if attention_mask is None:
+            attention_mask = torch.ones(input_shape, device=device)
+        if attention_mask.dim() == 3:
+            extended_attention_mask = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            extended_attention_mask = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(
+                f"Wrong shape for attention_mask (shape {tuple(attention_mask.shape)})"
+            )
+        extended_attention_mask = extended_attention_mask.to(dtype=dtype)
+        return (1.0 - extended_attention_mask) * torch.finfo(dtype).min
+
+    PreTrainedModel.get_extended_attention_mask = get_extended_attention_mask
+
+
+def load_sentence_transformer(model_name_or_path, *, device: str = "cpu"):
+    """Load a local or Hub SentenceTransformer with nomic/transformers-5 compat."""
+    ensure_nomic_transformers5_compat()
     from sentence_transformers import SentenceTransformer
 
-    model = SentenceTransformer(
-        config["base_model"], trust_remote_code=True, device="cpu"
+    return SentenceTransformer(
+        str(model_name_or_path), trust_remote_code=True, device=device
     )
+
+
+def load_base_model(config: dict):
+    """Load the base SentenceTransformer (warm start / frozen baseline)."""
+    model = load_sentence_transformer(config["base_model"], device="cpu")
     model.max_seq_length = config.get("train", {}).get("max_seq_length", 128)
     return model
 
@@ -466,8 +509,7 @@ def run(
             raise FileNotFoundError(
                 f"--eval-only but no saved model at {model_dir}; train first."
             )
-        from sentence_transformers import SentenceTransformer
-        fine_model = SentenceTransformer(str(model_dir), trust_remote_code=True, device="cpu")
+        fine_model = load_sentence_transformer(model_dir, device="cpu")
     else:
         if len(triples) == 0:
             raise RuntimeError("No training triples; check splits/pairs.")

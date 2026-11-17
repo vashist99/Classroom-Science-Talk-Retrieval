@@ -440,15 +440,15 @@ class TestScoreRoutingAudit:
         assert report["agreement"] == pytest.approx(1 / 3)
         assert report["passed"] is False  # target 0.80
         assert (tmp_path / "routing_audit_scored.parquet").exists()
-        assert (tmp_path / "routing_audit_scored.xlsx").exists()
+        assert (tmp_path / c5.ROUTING_AUDIT_SCORED_XLSX).exists()
         assert (tmp_path / "routing_audit_report.json").exists()
-        assert (tmp_path / "routing_audit_disagreements.xlsx").exists()
+        assert (tmp_path / c5.ROUTING_AUDIT_DISAGREEMENTS_XLSX).exists()
 
         scored = pd.read_parquet(tmp_path / "routing_audit_scored.parquet")
         assert "agree" in scored.columns
         assert scored["agree"].notna().sum() == 3
 
-        disagreements = pd.read_excel(tmp_path / "routing_audit_disagreements.xlsx")
+        disagreements = pd.read_excel(tmp_path / c5.ROUTING_AUDIT_DISAGREEMENTS_XLSX)
         assert len(disagreements) == 2
         assert set(disagreements["id"]) == {"p2", "n1"}
 
