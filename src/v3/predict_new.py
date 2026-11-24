@@ -74,11 +74,28 @@ from src.v3.stage2_llm import S2_DIR, score_transcripts_with_llm
 MODELS_DIR = PROJECT_ROOT / "models" / "v3"
 
 
-def _embed_unique_nomic(df: pd.DataFrame, client: UFNavigatorClient) -> tuple[np.ndarray, np.ndarray]:
-    """Embed unique `(speaker, utterance)` keys via UF NaviGator `nomic-embed-text-v1.5`."""
-    spks = df["speaker"].fillna("unknown").astype(str).tolist()
-    utts = df["utterance"].fillna("").astype(str).tolist()
-    keys = [f"{s}|||{u}" for s, u in zip(spks, utts)]
+def _load_warm_nomic_cache() -> dict[str, np.ndarray]:
+    """Warm-start in-memory float16 Nomic embedding cache from `data/v3/embeddings/` if present."""
+    emb_dir = DATA_DIR / "embeddings"
+    v_path = emb_dir / "vocab.parquet"
+    n_path = emb_dir / "nomic-embed-text-v1_5_unique_f16.npy"
+    if not (v_path.exists() and n_path.exists()):
+        return {}
+    vocab = pd.read_parquet(v_path)
+    mat = np.load(n_path)  # (V, 768) float16, already L2-normalized
+    keys = vocab["key"].astype(str).tolist()
+    return {k: mat[i] for i, k in enumerate(keys)}
+
+
+def _embed_unique_nomic(
+    df: pd.DataFrame,
+    client: UFNavigatorClient,
+    embed_cache: dict[str, np.ndarray] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Embed unique `[speaker] utterance` keys via UF NaviGator `nomic-embed-text-v1.5`, reusing cache."""
+    spks = df["speaker"].fillna("unknown").astype(str).str.strip().str.lower().tolist()
+    utts = df["utterance"].fillna("").astype(str).str.strip().tolist()
+    keys = [f"[{s}] {u}" for s, u in zip(spks, utts)]
     uniq_keys: list[str] = []
     key_to_id: dict[str, int] = {}
     uids = np.empty(len(df), dtype=np.int32)
@@ -90,19 +107,28 @@ def _embed_unique_nomic(df: pd.DataFrame, client: UFNavigatorClient) -> tuple[np
             uniq_keys.append(k)
         uids[i] = idx
 
-    texts = []
-    for k in uniq_keys:
-        s, u = k.split("|||", 1)
-        texts.append(f"classification: [{s}] {u}"[:1500])
-
     dim = 768
-    mat = np.zeros((len(texts), dim), dtype=np.float32)
+    mat = np.zeros((len(uniq_keys), dim), dtype=np.float32)
+    miss_indices: list[int] = []
+    miss_texts: list[str] = []
+    for i, k in enumerate(uniq_keys):
+        if embed_cache is not None and k in embed_cache:
+            mat[i] = embed_cache[k].astype(np.float32)
+        else:
+            miss_indices.append(i)
+            miss_texts.append(f"classification: {k}"[:1500])
+
     bs = 256
-    for i in range(0, len(texts), bs):
-        vecs = client.embed_batch(model="nomic-embed-text-v1.5", texts=texts[i : i + bs])
+    for bi in range(0, len(miss_texts), bs):
+        batch_txt = miss_texts[bi : bi + bs]
+        batch_idx = miss_indices[bi : bi + bs]
+        vecs = client.embed_batch(model="nomic-embed-text-v1.5", texts=batch_txt)
         arr = np.asarray(vecs, dtype=np.float32)
         arr /= np.maximum(np.linalg.norm(arr, axis=1, keepdims=True), 1e-8)
-        mat[i : i + len(arr)] = arr
+        for j, ui in enumerate(batch_idx):
+            mat[ui] = arr[j]
+            if embed_cache is not None:
+                embed_cache[uniq_keys[ui]] = arr[j].astype(np.float16)
     return mat, uids
 
 
@@ -634,6 +660,12 @@ def score_new_folder(
     science_only: bool = True,
     use_secondary_verifier: bool = True,
     force_full_model: bool = False,
+    client: UFNavigatorClient | None = None,
+    model_cache: dict[str, tuple[dict[str, Any], BiGRUEpisodeNet]] | None = None,
+    embed_cache: dict[str, np.ndarray] | None = None,
+    max_workers: int = 6,
+    verbose: bool = True,
+    print_json: bool = True,
 ) -> dict[str, Any]:
     """Score a classroom transcript folder and write 21-column Human coded workbooks.
 
@@ -660,23 +692,41 @@ def score_new_folder(
         and (fold_dir / f"pgkd_bigru_fold_{room_to_fold[room_id]}.pt").exists()
     ):
         held_f = int(room_to_fold[room_id])
+        cache_key = f"fold_{held_f}"
         pkl_path = fold_dir / f"portable_models_fold_{held_f}.pkl"
         gru_path = fold_dir / f"pgkd_bigru_fold_{held_f}.pt"
         model_selection = f"held_out_fold_{held_f} (zero same-classroom leakage for Y2 classroom {room_id})"
     else:
+        cache_key = "full_83"
         pkl_path = MODELS_DIR / "portable_models.pkl"
         gru_path = MODELS_DIR / "pgkd_bigru.pt"
         model_selection = f"full_83_room_bundle ({'forced' if force_full_model else 'brand-new unseen classroom'})"
 
-    with pkl_path.open("rb") as fh:
-        bundle = pickle.load(fh)
+    if model_cache is not None and cache_key in model_cache:
+        bundle, bigru = model_cache[cache_key]
+    else:
+        with pkl_path.open("rb") as fh:
+            bundle = pickle.load(fh)
+        ck_g = torch.load(gru_path, map_location="cpu", weights_only=True)
+        bigru = BiGRUEpisodeNet(
+            in_dim=ck_g["in_dim"],
+            proj_dim=int(ck_g.get("proj_dim", 256)),
+            hidden=int(ck_g.get("hidden", 192)),
+            dropout=0.40,
+        )
+        bigru.load_state_dict(ck_g["state_dict"])
+        bigru.eval()
+        if model_cache is not None:
+            model_cache[cache_key] = (bundle, bigru)
 
     df = load_raw_transcript_folder(input_dir)
     if len(df) == 0:
         raise ValueError(f"Loaded 0 valid utterances from {input_dir}")
 
-    client = UFNavigatorClient(budget_cap_usd=budget_cap_usd)
-    nomic_u, uids = _embed_unique_nomic(df, client)
+    if client is None:
+        client = UFNavigatorClient(budget_cap_usd=budget_cap_usd)
+    snap_start = client.ledger.summary()
+    nomic_u, uids = _embed_unique_nomic(df, client, embed_cache=embed_cache)
 
     # Align codebook feature columns strictly to training bundle order
     cb_cols = bundle["cb_cols"]
@@ -708,15 +758,6 @@ def score_new_folder(
 
     # 3. Portable PGKD BiGRU-Episode Net (held-out classroom fold or full bundle!)
     seqs, spans = _build_nomic_only_sequences(df, nomic_u, uids, cb_sc)
-    ck_g = torch.load(gru_path, map_location="cpu", weights_only=True)
-    bigru = BiGRUEpisodeNet(
-        in_dim=ck_g["in_dim"],
-        proj_dim=int(ck_g.get("proj_dim", 256)),
-        hidden=int(ck_g.get("hidden", 192)),
-        dropout=0.40,
-    )
-    bigru.load_state_dict(ck_g["state_dict"])
-    bigru.eval()
     p_gru = np.zeros(len(df), dtype=np.float32)
     with torch.no_grad():
         for x_np, (s, e) in zip(seqs, spans):
@@ -739,15 +780,20 @@ def score_new_folder(
     llm_subs = [""] * len(df)
     cal_unadjusted = cal_local.copy()
     scored_by = "local_v3"
+    n_llm_cand = 0
+    llm1_errors = 0
+    llm2_errors = 0
 
     if engine == "hybrid":
         cand_mask = screened_mask & (cal_local >= float(cfg["thr_stage1_llm_gate_r96"]))
+        n_llm_cand = int(cand_mask.sum())
         w_size = int(cfg.get("llm_window_size", 26))
         pllm = cfg["primary_llm"]
         res1 = score_transcripts_with_llm(
             df, client=client, model=pllm["model"], reasoning_effort=pllm.get("effort"),
-            target_mask=cand_mask, window_size=w_size, expand_radius=5, max_workers=4, verbose=True,
+            target_mask=cand_mask, window_size=w_size, expand_radius=5, max_workers=max_workers, verbose=verbose,
         )
+        llm1_errors = int(res1["stats"]["n_errors"])
         llm_comb = res1["scores"].copy()
         llm_rats = list(res1["rationale"])
         llm_subs = list(res1["subtype"])
@@ -758,8 +804,9 @@ def score_new_folder(
             if v_mask.any():
                 res2 = score_transcripts_with_llm(
                     df, client=client, model=sllm["model"], reasoning_effort=sllm.get("effort"),
-                    target_mask=v_mask, window_size=w_size, expand_radius=3, max_workers=4, verbose=True,
+                    target_mask=v_mask, window_size=w_size, expand_radius=3, max_workers=max_workers, verbose=verbose,
                 )
+                llm2_errors = int(res2["stats"]["n_errors"])
                 l2 = np.where(res2["evaluated"], res2["scores"], res1["scores"])
                 llm_comb = 0.60 * res1["scores"] + 0.40 * l2
                 for i in range(len(df)):
@@ -798,8 +845,13 @@ def score_new_folder(
     out_summary: dict[str, Any] = {
         "folder": input_dir.name,
         "model_selection": model_selection,
+        "n_files": int(len(all_files)),
         "n_turns_total": int(len(df)),
         "n_turns_screened": int(screened_mask.sum()),
+        "n_llm_cand_turns": n_llm_cand,
+        "llm1_errors": llm1_errors,
+        "llm2_errors": llm2_errors,
+        "llm_errors": llm1_errors + llm2_errors,
         "engine": engine,
         "modes": {},
     }
@@ -851,16 +903,183 @@ def score_new_folder(
 
     cal_mean_pct = round(100.0 * float(cal_unadjusted[screened_mask].mean()), 2) if screened_mask.any() else 0.0
     out_summary["calibrated_mean_science_pct"] = cal_mean_pct
+    out_summary["folder_cost_usd"] = round(float(client.ledger.diff_from(snap_start)["usd_spent"]), 5)
     out_summary["ledger"] = client.ledger.summary()
-    print(json.dumps(out_summary, indent=2))
+    if print_json:
+        print(json.dumps(out_summary, indent=2))
     return out_summary
+
+
+def score_batch_folders(
+    input_root: Path,
+    output_dir: Path,
+    *,
+    engine: str = "hybrid",
+    mode: str = "both",
+    budget_cap_usd: float = 25.0,
+    science_only: bool = True,
+    use_secondary_verifier: bool = True,
+    force_full_model: bool = False,
+    resume: bool = True,
+    max_workers: int = 6,
+) -> dict[str, Any]:
+    """Resumable, leak-free batch scorer across an entire directory of classroom folders (e.g. all 85 Y2 rooms).
+
+    Features:
+      - Warm-starts Nomic embeddings from `data/v3/embeddings/` (~50% instant cache hits!).
+      - Shares one `UFNavigatorClient` and caches loaded 5-fold bundles in memory across all folders.
+      - Persists per-folder progress to `batch_progress.jsonl` and refreshes `batch_summary_85_classrooms.csv`
+        after EVERY folder so runs are 100% crash-safe and resumable (`--resume`).
+    """
+    t0 = time.time()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    folders = sorted([p for p in input_root.iterdir() if p.is_dir()])
+    if not folders:
+        raise FileNotFoundError(f"No classroom subfolders found under {input_root}")
+
+    progress_path = output_dir / "batch_progress.jsonl"
+    done_records: dict[str, dict[str, Any]] = {}
+    if resume and progress_path.exists():
+        for line in progress_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                if rec.get("status") == "ok" and rec.get("folder"):
+                    done_records[str(rec["folder"])] = rec
+            except json.JSONDecodeError:
+                continue
+
+    modes_req = ["screening", "standalone"] if mode == "both" else [mode]
+    embed_cache = _load_warm_nomic_cache()
+    print(
+        f"[score_batch] Found {len(folders)} classroom folders under {input_root} | "
+        f"warm embed cache={len(embed_cache):,} keys | already done={len(done_records)} | "
+        f"engine={engine} mode={mode} budget=${budget_cap_usd:.2f}",
+        flush=True,
+    )
+
+    client = UFNavigatorClient(budget_cap_usd=budget_cap_usd)
+    model_cache: dict[str, tuple[dict[str, Any], BiGRUEpisodeNet]] = {}
+    csv_path = output_dir / "batch_summary_85_classrooms.csv"
+    manifest_path = output_dir / "batch_manifest.json"
+
+    def _flatten_row(rec: dict[str, Any]) -> dict[str, Any]:
+        modes = rec.get("modes") or {}
+        return {
+            "folder": rec.get("folder"),
+            "status": rec.get("status", "ok"),
+            "model_selection": rec.get("model_selection", ""),
+            "n_files": rec.get("n_files", 0),
+            "n_turns_total": rec.get("n_turns_total", 0),
+            "n_turns_screened": rec.get("n_turns_screened", 0),
+            "n_llm_cand_turns": rec.get("n_llm_cand_turns", 0),
+            "screening_sci_n": (modes.get("screening") or {}).get("predicted_science"),
+            "standalone_sci_n": (modes.get("standalone") or {}).get("predicted_science"),
+            "calibrated_mean_science_pct": rec.get("calibrated_mean_science_pct"),
+            "llm_errors": rec.get("llm_errors", 0),
+            "folder_cost_usd": rec.get("folder_cost_usd", 0.0),
+            "elapsed_s": rec.get("elapsed_s", 0.0),
+            "error": rec.get("error", ""),
+        }
+
+    def _flush_summary() -> None:
+        rows = [_flatten_row(done_records[f.name]) for f in folders if f.name in done_records]
+        if rows:
+            pd.DataFrame(rows).to_csv(csv_path, index=False)
+
+    n_ok = 0
+    n_skip = 0
+    n_fail = 0
+    for idx, folder in enumerate(folders, start=1):
+        fname = folder.name
+        if resume and fname in done_records:
+            expected_ok = all((output_dir / m / f"{fname}.xlsx").exists() for m in modes_req)
+            if expected_ok:
+                n_skip += 1
+                continue
+
+        f_t0 = time.time()
+        try:
+            res = score_new_folder(
+                folder,
+                output_dir,
+                engine=engine,
+                mode=mode,
+                budget_cap_usd=budget_cap_usd,
+                science_only=science_only,
+                use_secondary_verifier=use_secondary_verifier,
+                force_full_model=force_full_model,
+                client=client,
+                model_cache=model_cache,
+                embed_cache=embed_cache,
+                max_workers=max_workers,
+                verbose=False,
+                print_json=False,
+            )
+            res["status"] = "ok"
+            res["elapsed_s"] = round(time.time() - f_t0, 1)
+            res.pop("ledger", None)
+            done_records[fname] = res
+            with progress_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(res) + "\n")
+            _flush_summary()
+            n_ok += 1
+            led = client.ledger.summary()
+            scr_n = (res["modes"].get("screening") or {}).get("predicted_science", "-")
+            std_n = (res["modes"].get("standalone") or {}).get("predicted_science", "-")
+            print(
+                f"  [{idx:2d}/{len(folders)}] {fname:28s} | files={res['n_files']:2d} scr_turns={res['n_turns_screened']:5d} | "
+                f"screen={scr_n} stand={std_n} | cal={res['calibrated_mean_science_pct']:.2f}% | "
+                f"err={res['llm_errors']} | {res['elapsed_s']:.1f}s | total=${led['usd_spent']:.4f}",
+                flush=True,
+            )
+        except Exception as exc:
+            n_fail += 1
+            err_rec = {
+                "folder": fname,
+                "status": "error",
+                "error": f"{type(exc).__name__}: {str(exc)[:240]}",
+                "elapsed_s": round(time.time() - f_t0, 1),
+            }
+            with progress_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(err_rec) + "\n")
+            print(f"  [{idx:2d}/{len(folders)}] [ERROR] {fname}: {err_rec['error']}", flush=True)
+
+    _flush_summary()
+    all_ok = [done_records[f.name] for f in folders if f.name in done_records and done_records[f.name].get("status") == "ok"]
+    manifest = {
+        "input_root": str(input_root),
+        "output_dir": str(output_dir),
+        "engine": engine,
+        "mode": mode,
+        "n_folders_total": len(folders),
+        "n_folders_completed": len(all_ok),
+        "n_folders_skipped_resume": n_skip,
+        "n_folders_failed": n_fail,
+        "total_files_scored": int(sum(r.get("n_files", 0) for r in all_ok)),
+        "total_turns_screened": int(sum(r.get("n_turns_screened", 0) for r in all_ok)),
+        "total_screening_sci": int(sum((r.get("modes", {}).get("screening") or {}).get("predicted_science", 0) for r in all_ok)),
+        "total_standalone_sci": int(sum((r.get("modes", {}).get("standalone") or {}).get("predicted_science", 0) for r in all_ok)),
+        "total_llm_errors": int(sum(r.get("llm_errors", 0) for r in all_ok)),
+        "elapsed_min": round((time.time() - t0) / 60.0, 2),
+        "ledger": client.ledger.summary(),
+        "summary_csv": str(csv_path),
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    print(f"\n[score_batch] COMPLETE! {len(all_ok)}/{len(folders)} folders | {manifest['total_files_scored']} files | "
+          f"screening={manifest['total_screening_sci']:,} | standalone={manifest['total_standalone_sci']:,} | "
+          f"llm_err={manifest['total_llm_errors']} | ${manifest['ledger']['usd_spent']:.4f} | {manifest['elapsed_min']} min", flush=True)
+    return manifest
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="TeLI Science Talk v3 Production Trainer & Unseen-Folder Scorer")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("train-artifacts", help="Train and save calibrated portable production bundle in models/v3/")
-    sc = sub.add_parser("score", help="Score a brand-new unseen classroom transcript folder")
+
+    sc = sub.add_parser("score", help="Score a single classroom transcript folder")
     sc.add_argument("--input-dir", type=Path, required=True)
     sc.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "reports" / "v3" / "new_predictions")
     sc.add_argument("--engine", choices=["hybrid", "local"], default="hybrid")
@@ -870,10 +1089,22 @@ def main() -> None:
     sc.add_argument("--full-transcript", action="store_true")
     sc.add_argument("--force-full-model", action="store_true", help="Force full 83-room bundle even if classroom is in Y2 training rooms")
 
+    sb = sub.add_parser("score-batch", help="Resumable batch scorer across all classroom folders in a root directory")
+    sb.add_argument("--input-root", type=Path, required=True)
+    sb.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "reports" / "v3" / "y2_full_85_classrooms")
+    sb.add_argument("--engine", choices=["hybrid", "local"], default="hybrid")
+    sb.add_argument("--mode", choices=["screening", "standalone", "both"], default="both")
+    sb.add_argument("--budget", type=float, default=25.0)
+    sb.add_argument("--workers", type=int, default=6)
+    sb.add_argument("--no-secondary", action="store_true")
+    sb.add_argument("--no-resume", action="store_true")
+    sb.add_argument("--full-transcript", action="store_true")
+    sb.add_argument("--force-full-model", action="store_true")
+
     args = ap.parse_args()
     if args.cmd == "train-artifacts":
         train_deployable_artifacts(verbose=True)
-    else:
+    elif args.cmd == "score":
         score_new_folder(
             args.input_dir, args.output_dir,
             engine=args.engine, mode=args.mode,
@@ -881,6 +1112,17 @@ def main() -> None:
             science_only=not args.full_transcript,
             use_secondary_verifier=not args.no_secondary,
             force_full_model=args.force_full_model,
+        )
+    else:
+        score_batch_folders(
+            args.input_root, args.output_dir,
+            engine=args.engine, mode=args.mode,
+            budget_cap_usd=args.budget,
+            science_only=not args.full_transcript,
+            use_secondary_verifier=not args.no_secondary,
+            force_full_model=args.force_full_model,
+            resume=not args.no_resume,
+            max_workers=args.workers,
         )
 
 

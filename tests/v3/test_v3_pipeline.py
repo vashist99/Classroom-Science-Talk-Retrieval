@@ -398,3 +398,35 @@ def test_usf_pm2_cluster_veto_and_context_extraction():
     cleaned = clean_training_labels_for_usf(df)
     assert cleaned[4] == -2
     assert df["label"].iloc[4] == 1  # original evaluation label strictly untouched!
+
+
+def test_predict_new_classroom_id_and_warm_embed_cache():
+    from src.v3.predict_new import _embed_unique_nomic, _extract_classroom_id
+
+    assert _extract_classroom_id("Classroom10_020526") == "10"
+    assert _extract_classroom_id("Classroom49_012026_updated") == "49"
+    assert _extract_classroom_id("UnseenNewRoom") is None
+
+    # Verify _embed_unique_nomic reuses warm cache and ONLY calls embed_batch for cache misses!
+    class _StubClient:
+        def __init__(self):
+            self.calls = []
+
+        def embed_batch(self, *, model, texts):
+            self.calls.append((model, list(texts)))
+            return [[1.0] + [0.0] * 767 for _ in texts]
+
+    v_cached = np.zeros(768, dtype=np.float16)
+    v_cached[1] = 1.0
+    cache = {"[adult] Is it raining?": v_cached}
+    df = pd.DataFrame({
+        "speaker": ["adult", "adult", "child"],
+        "utterance": ["Is it raining?", "Is it raining?", "Cloudy."],
+    })
+    stub = _StubClient()
+    mat, uids = _embed_unique_nomic(df, stub, embed_cache=cache)
+    assert len(stub.calls) == 1
+    assert stub.calls[0][1] == ["classification: [child] Cloudy."]
+    assert len(mat) == 2 and list(uids) == [0, 0, 1]
+    assert mat[0, 1] == pytest.approx(1.0, abs=1e-3)
+    assert "[child] Cloudy." in cache
