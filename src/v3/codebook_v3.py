@@ -24,50 +24,51 @@ from typing import Any
 
 LIFE_SCIENCE_RE = re.compile(
     r"\b("
-    r"living|non-?living|alive|dead|organism|animal|animals|mammal|mammals|"
-    r"reptile|reptiles|amphibian|amphibians|insect|insects|bug|bugs|arachnid|"
-    r"bird|birds|fish|whale|whales|shark|sharks|dolphin|octopus|jellyfish|"
-    r"seahorse|sea\s+horse|turtle|turtles|iguana|iguanas|lizard|lizards|"
-    r"snake|snakes|frog|frogs|tadpole|toad|butterfly|butterflies|caterpillar|"
-    r"caterpillars|chrysalis|cocoon|larva|larvae|metamorphosis|bee|bees|"
-    r"bumblebee|ladybug|ladybugs|ant|ants|mosquito|mosquitoes|grasshopper|"
-    r"mantis|spider|spiders|worm|worms|snail|snails|bat|bats|owl|owls|"
-    r"elephant|kangaroo|skunk|wolf|deer|bear|moose|mouse|squirrel|raccoon|"
-    r"penguin|giraffe|zebra|monkey|hippo|rhino|dinosaur|fossil|fossils|"
-    r"carnivore|herbivore|omnivore|predator|predators|prey|nocturnal|"
+    r"living|non-?living|alive|dead|organisms?|animals?|mammals?|"
+    r"reptiles?|amphibians?|insects?|bugs?|arachnids?|"
+    r"birds?|fish|whales?|sharks?|dolphins?|octopus(?:es)?|jellyfish|"
+    r"seahorses?|sea\s+horses?|turtles?|iguanas?|lizards?|"
+    r"snakes?|frogs?|tadpoles?|toads?|butterfl(?:y|ies)|caterpillars?|"
+    r"chrysalis|cocoons?|larva|larvae|metamorphosis|bees?|"
+    r"bumblebees?|ladybugs?|ants?|mosquito(?:es)?|grasshoppers?|crickets?|"
+    r"mantis|spiders?|worms?|snails?|bats?|owls?|"
+    r"elephants?|kangaroos?|skunks?|wol(?:f|ves)|deer|bears?|moose|mouse|mice|squirrels?|raccoons?|"
+    r"penguins?|giraffes?|zebras?|monkeys?|hippos?|rhinos?|dinosaurs?|fossils?|"
+    r"guinea\s+pigs?|opossums?|possums?|lions?|tigers?|"
+    r"carnivores?|herbivores?|omnivores?|predators?|prey|nocturnal|"
     r"hibernat\w*|migrat\w*|camouflag\w*|adapt\w*|extinct\w*|endangered|"
-    r"life\s*cycle|hatch\w*|eggs?|nest|nests|wings?|feathers?|scales?|fur|"
-    r"fins?|gills?|beak|claws?|tail|tails|legs?|teeth|tooth|antenn\w*|thorax|"
-    r"abdomen|shell|skeleton|grow|grows|growing|grown|growth|decay\w*|mold|fungus|"
-    r"plant|plants|seed|seeds|seedling|sprout\w*|germinat\w*|root|roots|"
-    r"stem|stems|trunk|branch|branches|leaf|leaves|petal|petals|flower|"
-    r"flowers|blossom|pollen|pollinat\w*|nectar|photosynthes\w*|chlorophyll|"
-    r"plant\s+bulb|vine|vines|bark|sap|fruit|fruits|vegetable|vegetables|nutrients?|"
+    r"life\s*cycle|hatch\w*|eggs?|nests?|wings?|feathers?|scales?|fur|"
+    r"fins?|gills?|beaks?|claws?|tails?|legs?|paws?|hooves?|teeth|tooth|antenn\w*|thorax|"
+    r"abdomen|shells?|skeletons?|grow|grows|growing|grown|growth|decay\w*|mold|fungus|"
+    r"plants?|seeds?|seedlings?|sprout\w*|germinat\w*|roots?|"
+    r"stems?|trunks?|branch(?:es)?|leaf|leaves|petals?|flowers?|"
+    r"blossoms?|pollen|pollinat\w*|nectar|photosynthes\w*|chlorophyll|"
+    r"plant\s+bulb|pine\s+cones?|vines?|bark|sap|fruits?|vegetables?|nutrients?|"
     r"nutrition|healthy|vitamins?|protein|digestion|digest\w*|"
-    r"heart|heartbeat|pulse|blood|veins?|arter\w*|bones?|spine|skull|rib|ribs|"
-    r"lungs?|breath\w*|oxygen|muscle|muscles|brain|nerves?|stomach|skin|"
-    r"senses?|five\s+senses|sense\s+of|germs?|bacteria|virus|microscope|"
-    r"veterinarian|botanist|biologist|scientist|scientists"
+    r"hearts?|heartbeat|pulse|blood|veins?|arter\w*|bones?|spine|skull|ribs?|"
+    r"lungs?|breath\w*|oxygen|muscles?|brains?|nerves?|stomach|skin|"
+    r"senses?|five\s+senses|sense\s+of|germs?|bacteria|virus|microscopes?|"
+    r"veterinarians?|botanists?|biologists?|scientists?"
     r")\b",
     re.I,
 )
 
 PHYSICAL_SCIENCE_RE = re.compile(
     r"\b("
-    r"force|forces|push(?:es|ed|ing)?|pull(?:s|ed|ing)?|motion|gravity|friction|inertia|"
-    r"momentum|magnet|magnets|magnetic|attract\w*|repel\w*|poles?|metal|iron|"
-    r"steel|solid|solids|liquid|liquids|gas|gases|matter|states?\s+of\s+matter|"
+    r"forces?|push(?:es|ed|ing)?|pull(?:s|ed|ing)?|motion|gravity|friction|inertia|"
+    r"momentum|magnets?|magnetic|attract\w*|repel\w*|poles?|metals?|iron|"
+    r"steel|solids?|liquids?|gas|gases|atoms?|molecules?|matter|states?\s+of\s+matter|"
     r"melt|melts|melting|melted|freeze|freezes|freezing|frozen|evaporat\w*|"
-    r"condens\w*|boil\w*|steam|vapor|ice\s+cube|absorb\w*|dissolv\w*|mix|mixture|"
-    r"solution|chemical|reaction|bubble|bubbles|fizz\w*|foam|float|floats|"
+    r"condens\w*|boil\w*|steam|vapor|ice\s+cubes?|absorb\w*|dissolv\w*|mix|mixture|"
+    r"solution|chemical|reaction|bubbles?|fizz\w*|foam|float|floats|"
     r"floating|sink|sinks|sinking|sank|buoyan\w*|dense|density|heavy|heavier|"
     r"heaviest|light|lighter|lightest|weight|weigh\w*|mass|volume|balance|"
-    r"energy|heat|thermal|electric\w*|battery|circuit|wire|bulb|light\s+bulb|"
-    r"shadow|shadows|reflect\w*|prism|rainbow|transparent|opaque|translucent|"
-    r"sound|vibrat\w*|pitch|loud|louder|echo|wave|waves|"
-    r"material|materials|property|properties|texture|rough|smooth|bumpy|"
+    r"energy|heat|thermal|electric\w*|batter(?:y|ies)|circuits?|wires?|bulbs?|light\s+bulbs?|"
+    r"shadows?|reflect\w*|prisms?|rainbows?|transparent|opaque|translucent|"
+    r"sounds?|vibrat\w*|pitch|loud|louder|echo|waves?|"
+    r"materials?|propert(?:y|ies)|textures?|rough|smooth|bumpy|"
     r"hard|soft|flexible|rigid|elastic|stretch\w*|absorbent|waterproof|"
-    r"sturdy|fragile|slope|ramp|incline|inclined|speed|faster|slower|"
+    r"sturdy|fragile|slopes?|ramps?|incline|inclined|speed|faster|slower|"
     r"roll(?:s|ed|ing)?|bounce(?:s|d|ing)?|stick(?:s|ing)?|stuck"
     r")\b",
     re.I,
@@ -75,18 +76,18 @@ PHYSICAL_SCIENCE_RE = re.compile(
 
 EARTH_SPACE_RE = re.compile(
     r"\b("
-    r"weather|sunny|cloudy|clouds?|windy|wind|rain|raining|rainy|storm|storms|"
-    r"thunder|lightning|tornado|hurricane|snow|snowing|hail|fog|foggy|mist|"
-    r"temperature|thermometer|degrees?|fahrenheit|celsius|forecast|climate|"
-    r"season|seasons|spring|summer|autumn|fall\s+leaves|winter|frost|drought|"
-    r"flood|erosion|water\s+cycle|precipitation|puddle|"
-    r"earth|sun|sunlight|solar|moon|lunar|crescent|full\s+moon|"
-    r"constellation|planet|planets|mercury|venus|mars|jupiter|saturn|uranus|"
-    r"neptune|orbit|comet|comets|asteroid|meteor|galaxy|universe|"
-    r"astronaut|telescope|space|rocket|crater|eclipse|rotate|rotation|"
-    r"volcano|volcanoes|magma|lava|eruption|erupt\w*|earthquake|rock|rocks|"
-    r"mineral|minerals|crystal|crystals|geode|pebble|sand|soil|dirt|mud|clay|"
-    r"ocean|oceans|river|lake|pond|glacier|mountain|valley|canyon|island|desert"
+    r"weather|sunny|cloudy|clouds?|windy|wind|rain|raining|rainy|raindrops?|storms?|"
+    r"thunder|lightning|tornado(?:es)?|hurricanes?|snow|snowing|snowflakes?|hail|fog|foggy|mist|"
+    r"temperature|thermometers?|degrees?|fahrenheit|celsius|forecast|climate|"
+    r"seasons?|spring|summer|autumn|fall\s+leaves|winter|frost|drought|"
+    r"floods?|erosion|water\s+cycle|precipitation|puddles?|"
+    r"earth|sun|sunlight|sunshine|solar|moons?|lunar|crescent|full\s+moon|"
+    r"constellations?|planets?|mercury|venus|mars|jupiter|saturn|uranus|"
+    r"neptune|orbit|comets?|asteroids?|meteors?|galax(?:y|ies)|universe|"
+    r"astronauts?|telescopes?|space|rockets?|craters?|eclipse|rotate|rotation|"
+    r"volcano(?:es)?|magma|lava|eruptions?|erupt\w*|earthquakes?|rocks?|"
+    r"minerals?|crystals?|geodes?|pebbles?|sand|soil|dirt|mud|clay|"
+    r"oceans?|rivers?|lakes?|ponds?|glaciers?|mountains?|valleys?|canyons?|islands?|deserts?"
     r")\b",
     re.I,
 )
@@ -224,15 +225,34 @@ TRAP_COUNT_BARE_RE = re.compile(
     r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)"
     r"(?:[,.\s]+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+))*"
     r"[.?!]?)\s*$|"
-    r"\bhow\s+many\s+(?:friends|kids|children|words|letters|cookies|blocks|stickers|days|minutes)\b)",
+    r"\bhow\s+many\s+(?:friends|kids|children|words|letters|cookies|blocks|stickers|days|minutes|cubes|sides|corners|shapes)\b)",
+    re.I,
+)
+
+# USF Feedback Strict Exclusion Detectors (Shapes, Broad Counting, Look/Observe without Content)
+TRAP_SHAPE_ONLY_RE = re.compile(
+    r"(?<!pine\s)(?<!in\s)\b(what\s+shape|shapes?|circles?|squares?|triangles?|"
+    r"rectangles?|ovals?|diamonds?|rhombus(?:es)?|pentagons?|hexagons?|octagons?|trapezoids?|"
+    r"cylinders?|cones?|cubes?|spheres?|2d|3d)\b",
+    re.I,
+)
+
+TRAP_COUNT_BROAD_RE = re.compile(
+    r"(\bhow\s+many\b|\blet'?s\s+count\b|\bcount(?:ing|ed|s)?\b|"
+    r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s*[,\s]+\s*(?:two|three|four|five|six|seven|eight|nine|ten)\b)",
+    re.I,
+)
+
+LOOK_OBS_ANY_RE = re.compile(
+    r"\b(look|looking|looks|looked|lookie|observe|observing|observation|notice|noticing|noticed|see|seeing|watch|watching)\b",
     re.I,
 )
 
 TRAP_SHAPE_COLOR_RE = re.compile(
-    r"\b(what\s+shape|what\s+color|circle|circles|square|squares|triangle|triangles|"
-    r"rectangle|rectangles|oval|diamond|rhombus|pentagon|hexagon|octagon|trapezoid|"
-    r"cylinder|cone|cube|star\s+shape|heart\s+shape|2d|3d|"
-    r"color\s+(?:it|this|the)|crayon|crayons|marker|markers|"
+    r"(?<!pine\s)(?<!in\s)\b(what\s+shape|what\s+color|shapes?|circles?|squares?|triangles?|"
+    r"rectangles?|ovals?|diamonds?|rhombus(?:es)?|pentagons?|hexagons?|octagons?|trapezoids?|"
+    r"cylinders?|cones?|cubes?|spheres?|star\s+shape|heart\s+shape|2d|3d|"
+    r"color\s+(?:it|this|the)|crayons?|markers?|"
     r"(?:is\s+it|that'?s|it'?s|the\s+color)\s+(?:red|blue|green|yellow|orange|purple|pink|black|white|brown|gray))\b",
     re.I,
 )
@@ -284,7 +304,9 @@ def extract_codebook_features(text: str, speaker: str = "unknown") -> dict[str, 
     c_es_sci = len(SPANISH_SCIENCE_RE.findall(s))
     c_content_total = c_life + c_phys + c_earth + c_env + c_eng + c_es_sci
 
-    p_obs = len(PRACTICE_OBSERVE_RE.findall(s))
+    p_obs_raw = len(PRACTICE_OBSERVE_RE.findall(s))
+    # USF strict rule: looking/observing only counts as positive observation cue when paired with a science content word!
+    p_obs = p_obs_raw if c_content_total > 0 else 0
     p_comp = len(PRACTICE_COMPARE_RE.findall(s))
     p_pred = len(PRACTICE_PREDICT_RE.findall(s))
     p_test = len(PRACTICE_TEST_RE.findall(s))
@@ -295,13 +317,16 @@ def extract_codebook_features(text: str, speaker: str = "unknown") -> dict[str, 
     t_deictic = 1.0 if TRAP_DEICTIC_BARE_RE.match(s) else 0.0
     t_count = 1.0 if TRAP_COUNT_BARE_RE.search(s) else 0.0
     t_shape = float(len(TRAP_SHAPE_COLOR_RE.findall(s)))
+    t_shape_only = 1.0 if (TRAP_SHAPE_ONLY_RE.search(s) and c_content_total == 0) else 0.0
+    t_count_only = 1.0 if (TRAP_COUNT_BROAD_RE.search(s) and c_content_total == 0) else 0.0
+    t_look_no_content = 1.0 if (LOOK_OBS_ANY_RE.search(s) and c_content_total == 0) else 0.0
     t_mgmt = float(len(TRAP_MANAGEMENT_RE.findall(s)))
     t_lit = float(len(TRAP_LITERACY_CRAFT_RE.findall(s)))
     t_temp = float(len(TRAP_TEMP_CASUAL_RE.findall(s)))
     t_pretend = float(len(TRAP_PRETEND_FOOD_RE.findall(s)))
 
     spk = (speaker or "unknown").strip().lower()
-    trap_sum = t_deictic + t_count + t_shape + t_mgmt + t_lit + t_pretend
+    trap_sum = t_deictic + t_count + t_shape + t_shape_only + t_count_only + 0.5 * t_look_no_content + t_mgmt + t_lit + t_pretend
     return {
         "n_words": float(n_words),
         "log_n_words": float(min(n_words, 60)) / 10.0,
@@ -331,6 +356,9 @@ def extract_codebook_features(text: str, speaker: str = "unknown") -> dict[str, 
         "trap_deictic_bare": t_deictic,
         "trap_count_bare": t_count,
         "trap_shape_color": t_shape,
+        "trap_shape_only": t_shape_only,
+        "trap_count_only": t_count_only,
+        "trap_look_no_content": t_look_no_content,
         "trap_mgmt": t_mgmt,
         "trap_lit_craft": t_lit,
         "trap_temp_casual": t_temp,
@@ -388,10 +416,10 @@ An utterance is SCIENCE_TALK (SCI) iff it meets Route A, Route B, or both:
 MANDATORY RULES (APPLY STRICTLY — DO NOT OVER-FLAG)
 1. Science activity != science talk: "Science center is open", "Go back to science", or cleaning/placing science items is NOT science.
 2. Science word alone != science talk: "Put the magnet away" = NOT science; "The magnet pulls the pieces together" = SCI.
-3. Practice word alone != science talk: "Look.", "Look at that.", "What do you see?", "Why?", "Because...", "What happens next?", "How many?" are SCI ONLY when the utterance or surrounding exchange clearly directs them at a scientific phenomenon, organism, or investigation.
+3. STRICT Looking / Observing Rule: Talk about "looking", "seeing", "watching", "noticing", or "observing" (e.g., "Look.", "Look at that.", "What do you see?", "Does yours look like mine?", "Let's look closely.") MUST be EXCLUDED (NOT science) UNLESS EITHER (a) the utterance itself includes a real science content word/organism/phenomenon (e.g., "Look at the caterpillar's legs", "Observe how the ice melts"), OR (b) it sits directly inside an unmistakable >=3-utterance active science investigation of a specific scientific phenomenon. Likewise, bare "Why?", "Because...", "What happens next?" require a clear science referent.
 4. Short / 1-word answers CAN be SCI when surrounding turns supply a clear science referent (e.g., Teacher: "What's the weather today?" -> Child: "Cloudy." => SCI; Teacher: "Name a predator." -> Child: "Lion." => SCI).
 5. Mixed management + science: Mentally strip management words; if real science meaning remains, code SCI.
-6. Math, counting, shapes, and colors alone are NOT science: "What shape is this?", "Circle.", "Square.", "One, two, three.", "How many cookies?" are NOT science unless explicitly measuring/comparing a scientific phenomenon (e.g., "Count the bumblebee's legs.").
+6. STRICT Shapes & Counting Exclusion: Talk about shapes/geometry ("What shape is this?", "Circle.", "Square.", "Triangle.", "Rectangle.", "Cone.", "Sphere.", "Aaron made a rectangle.") and counting ("How many?", "One, two, three, four...", "How many cubes/blocks/cookies?") MUST be EXCLUDED (NOT science). Counting counts ONLY when explicitly measuring/counting an anatomical or physical science property (e.g., "Count the bumblebee's legs.", "How many seeds sprouted?").
 7. Art & craft directions are NOT science: "Color the leaf green", "Glue the paper", "Play-Doh is full" are NOT science.
 8. Fiction, pretend play, food/clothing/decorations, and story plot are NOT science unless conveying real-world scientific facts or genuine science sensemaking ("Eat your apple", "Look at the butterfly on my shirt", or pretend animal voices = NOT science).
 9. Casual comfort/weather small talk outside weather/temperature instruction is NOT science ("It was cold this morning", "My soup is hot", "Put your coat on because it's chilly" = NOT science; structured weather discussion "Is it sunny or cloudy today?" = SCI).
@@ -399,6 +427,7 @@ MANDATORY RULES (APPLY STRICTLY — DO NOT OVER-FLAG)
 11. Science read-aloud IS included: Reading factual science sentences from a book or video counts as SCI.
 12. Both adult and child talk count equally; inaccurate child science ideas still count as SCI if about a science concept/practice.
 13. Noisy ASR & Spanish/code-switching: If fragmented ASR still carries recoverable science meaning in context, code SCI with low conf (1-2); if meaning is unrecoverable, do NOT guess SCI.
+14. Episode Cluster Prior: True preschool science talk rarely occurs as a single stand-alone utterance — it typically appears in clusters of >=3 science-related utterances together. Be extra conservative on isolated 1-turn candidates unless they unmistakably state a clear science concept.
 
 CONTRASTIVE EXAMPLES (POSITIVE vs HARD NEGATIVE TRAPS)
 - [SCI 0.95] adult: "Push and pull are both forces." (Route A: physical science concept)
@@ -439,8 +468,232 @@ Two independent models DISAGREED on whether a target utterance is SCIENCE_TALK.
 Your job is to inspect the surrounding classroom dialogue and apply the manual's exact inclusion AND exclusion rules with high precision:
 - Route A (Science Content): facts/concepts/categories/properties/structures/processes in Life, Physical, Earth/Space, Ecology, or Functional Engineering.
 - Route B (Science Practice): observing, comparing/classifying, predicting, testing, causal reasoning, or evidence directed at a natural/physical phenomenon or functional design.
-- REJECT (score <= 0.25): bare deictic "Look!"/"What do you see?" without a clear science referent; classroom management even with science words ("put the magnet away", "science is open"); shape/color/math/counting alone ("circle", "how many"); art/craft directions ("color the leaf"); pretend play/toy naming/story plot without real-world science facts; casual comfort talk ("it was cold this morning" outside weather instruction).
-- ACCEPT (score >= 0.70): genuine science content or practice, science read-aloud, or short 1-word answers directly answering/continuing a clear science exchange in the context.
+- REJECT (score <= 0.25): talk about "looking"/"seeing"/"watching"/"observing" without a science content word (unless inside an unmistakable >=3-utterance active science investigation); classroom management even with science words ("put the magnet away", "science is open"); ALL shapes/geometry ("circle", "square", "rectangle", "cone", "what shape?"); counting ("how many?", "one, two, three, four...") unless explicitly counting/measuring a biological or physical science property; art/craft directions ("color the leaf"); pretend play/toy naming/story plot without real-world science facts; casual comfort talk ("it was cold this morning" outside weather instruction); weak isolated 1-turn hits without episode support.
+- ACCEPT (score >= 0.70): genuine science content or practice, science read-aloud, or short 1-word answers directly answering/continuing a clear >=3-utterance science exchange in the context.
 
 Return ONLY a single JSON object (no markdown fences):
 {"score": <float 0.0..1.0>, "conf": <int 1..5>, "route": <"content"|"practice"|"both"|"none">, "subtype": "<pipe-joined or none>", "rationale": "<=20 words>"}"""
+
+
+# ---------------------------------------------------------------------------
+# USF Feedback Helpers: Dirty Legacy TP Cleanup + Soft ±2 Cluster & Stage-2 Veto
+# ---------------------------------------------------------------------------
+
+def identify_legacy_excluded_tps(
+    df: Any,
+    *,
+    pause_cut_s: float = 30.0,
+) -> Any:
+    """Return boolean mask of legacy `Human coded` label==1 rows that violate USF's updated exclusions.
+
+    Used ONLY to clean/downweight Stage-1 training folds (NEVER alters evaluation ground truth!):
+      1. Pure shape/geometry TPs with zero science content word (e.g., "Aaron made a rectangle.").
+      2. Pure counting TPs with zero science content word (e.g., "How many cubes do you have?").
+      3. Look/observe TPs with zero science content word AND fewer than 2 content-bearing turns in ±2
+         (e.g., "Does yours look like mine?", "Look at this, you get different colors.").
+    """
+    import numpy as np
+
+    n = len(df)
+    labels = df["label"].to_numpy()
+    shape_only = df["cb_trap_shape_only"].to_numpy(dtype=np.float32) > 0
+    count_only = df["cb_trap_count_only"].to_numpy(dtype=np.float32) > 0
+    look_noc = df["cb_trap_look_no_content"].to_numpy(dtype=np.float32) > 0
+    has_c = df["cb_has_content"].to_numpy(dtype=np.float32) > 0
+
+    # Check if a look_no_content turn sits inside a clear content-rich ±2 exchange (>=2 content turns in ±2)
+    tx_ids = df["transcript_id"].to_numpy()
+    gaps = df["gap_prev_s"].fillna(0.0).to_numpy(dtype=np.float32)
+    starts = np.flatnonzero(np.r_[True, tx_ids[1:] != tx_ids[:-1]])
+    ends = np.r_[starts[1:], n]
+    pm2_content_cnt = np.zeros(n, dtype=np.int32)
+    for s, e in zip(starts, ends):
+        gp = gaps[s:e]
+        eb = np.flatnonzero(gp > pause_cut_s)
+        for es, ee in zip(np.r_[0, eb], np.r_[eb, e - s]):
+            gs = s + es
+            L = ee - es
+            hc = has_c[gs:gs + L]
+            for i in range(L):
+                lo, hi = max(0, i - 2), min(L, i + 3)
+                pm2_content_cnt[gs + i] = int(hc[lo:hi].sum())
+
+    dirty = (labels == 1) & (shape_only | count_only | (look_noc & (pm2_content_cnt < 2)))
+    return dirty
+
+
+def clean_training_labels_for_usf(df: Any) -> Any:
+    """Return a copy of `df['label']` cleaned STRICTLY for Stage-1/PGKD training folds.
+
+    NEVER used for evaluation (evaluation always scores against untouched original `df['label']`).
+      - Pure shape-only & counting-only legacy TPs (e.g., "Aaron made a rectangle.",
+        "How many cubes do you have?") -> -2 (masked out of positive training so Stage 1
+        stops upweighting legacy shape/counting errors by 4.5x without causing degenerate
+        linear feature separation on Y1!).
+      - Isolated bare deictic/look-without-content legacy TPs that lack content neighbors
+        AND match bare look/see traps -> -2 (masked out of positive training).
+    """
+    import numpy as np
+
+    train_lb = df["label"].to_numpy(dtype=np.int8).copy()
+    labels = df["label"].to_numpy()
+    shape_only = df["cb_trap_shape_only"].to_numpy(dtype=np.float32) > 0
+    count_only = df["cb_trap_count_only"].to_numpy(dtype=np.float32) > 0
+    bare_deictic = df["cb_trap_deictic_bare"].to_numpy(dtype=np.float32) > 0
+    # Mask ONLY unambiguous dirty legacy TPs (never flip to 0 with degenerate feature col!)
+    dirty_mask = (labels == 1) & (shape_only | count_only | bare_deictic)
+    train_lb[dirty_mask] = -2
+    return train_lb
+
+
+def apply_usf_cluster_and_veto_rules(
+    df: Any,
+    cal_probs: Any,
+    *,
+    llm_scores: Any | None = None,
+    llm_eval: Any | None = None,
+    support_thr: float = 0.05,
+    min_cluster: int = 3,
+    penalty_logit: float = 0.60,
+    pause_cut_s: float = 30.0,
+) -> tuple[Any, Any]:
+    """Apply USF-aligned ±2 chronological cluster rule & Stage-2 LLM exclusion veto (zero leakage!).
+
+    1. Pause-bounded ±2 window `[t-2, t-1, t, t+1, t+2]` inside each transcript:
+       Computes `pm2_sci_count` = count of turns in ±2 with `cal_probs >= support_thr`.
+       If `pm2_sci_count < min_cluster` (3), applies soft `-penalty_logit` (-0.60) in log-odds space.
+    2. Stage-2 LLM Veto Gate (fixes Screening-mode Stage-1 overrides!):
+       When Stage-2 LLMs evaluated a turn (`llm_eval == True`) and cleanly rejected it (`llm_scores <= 0.15`),
+       ANY USF exclusion trap (`trap_shape_only`, `trap_count_only`, or `trap_look_no_content` with `<3` cluster)
+       receives a decisive `-3.5` logit veto so Stage 1 cannot drag LLM-rejected shapes/counting/look turns
+       above the Screening threshold.
+    3. Local-only Trap Guardrail (when `llm_eval` is None):
+       Applies `-2.5` logit damping on pure `trap_shape_only` / `trap_count_only` turns outside a ≥3 cluster,
+       and `-1.2` logit damping on `trap_look_no_content` turns outside a ≥3 cluster.
+
+    Returns:
+      (adjusted_probs: float64[N], pm2_sci_count: int32[N])
+    """
+    import numpy as np
+    from scipy.special import expit, logit
+
+    n = len(df)
+    p = np.clip(np.asarray(cal_probs, dtype=np.float64), 1e-6, 1.0 - 1e-6)
+    z = logit(p)
+
+    # 1. Pause-bounded ±2 chronological support count
+    pm2_cnt = np.zeros(n, dtype=np.int32)
+    tx_ids = df["transcript_id"].to_numpy()
+    gaps = df["gap_prev_s"].fillna(0.0).to_numpy(dtype=np.float64)
+    starts = np.flatnonzero(np.r_[True, tx_ids[1:] != tx_ids[:-1]])
+    ends = np.r_[starts[1:], n]
+    for s, e in zip(starts, ends):
+        gp = gaps[s:e]
+        eb = np.flatnonzero(gp > pause_cut_s)
+        for es, ee in zip(np.r_[0, eb], np.r_[eb, e - s]):
+            gs = s + es
+            L = ee - es
+            pw = p[gs:gs + L]
+            hi_flags = (pw >= support_thr).astype(np.int32)
+            cs = np.r_[0, np.cumsum(hi_flags)]
+            idx = np.arange(L)
+            lo = np.maximum(0, idx - 2)
+            hi = np.minimum(L, idx + 3)
+            pm2_cnt[gs:gs + L] = cs[hi] - cs[lo]
+
+    isolated = pm2_cnt < min_cluster
+    z = np.where(isolated, z - penalty_logit, z)
+
+    # 2. Extract USF trap flags (from df columns if present, else compute cleanly on the fly)
+    if "cb_trap_shape_only" in df.columns and "cb_trap_count_only" in df.columns and "cb_trap_look_no_content" in df.columns:
+        shape_only = df["cb_trap_shape_only"].to_numpy(dtype=np.float32) > 0
+        count_only = df["cb_trap_count_only"].to_numpy(dtype=np.float32) > 0
+        look_noc = df["cb_trap_look_no_content"].to_numpy(dtype=np.float32) > 0
+    else:
+        utts = df["utterance"].fillna("").astype(str).tolist()
+        spks = df["speaker"].fillna("unknown").astype(str).tolist()
+        feats = [extract_codebook_features(u, s) for u, s in zip(utts, spks)]
+        shape_only = np.array([f["trap_shape_only"] > 0 for f in feats], dtype=bool)
+        count_only = np.array([f["trap_count_only"] > 0 for f in feats], dtype=bool)
+        look_noc = np.array([f["trap_look_no_content"] > 0 for f in feats], dtype=bool)
+
+    usf_trap_strict = shape_only | count_only | (look_noc & isolated)
+
+    if llm_scores is not None and llm_eval is not None:
+        ev = np.asarray(llm_eval, dtype=bool)
+        ls = np.asarray(llm_scores, dtype=np.float64)
+        # Stage-2 LLM Veto: both LLMs rejected (score <= 0.15) on an explicit USF trap -> veto Stage-1 override!
+        llm_veto = ev & (ls <= 0.15) & (shape_only | count_only | look_noc)
+        z = np.where(llm_veto, z - 3.5, z)
+        # Also damp un-evaluated pure shape/count traps outside a ≥3 cluster
+        local_fallback = (~ev) & (shape_only | count_only) & isolated
+        z = np.where(local_fallback, z - 2.5, z)
+    else:
+        # Local-only ($0-API) USF trap guardrail
+        z = np.where((shape_only | count_only) & isolated, z - 2.5, z)
+        z = np.where(look_noc & isolated, z - 1.2, z)
+
+    return expit(np.clip(z, -30.0, 30.0)), pm2_cnt
+
+
+def extract_pm2_context_columns(
+    df: Any,
+    *,
+    pause_cut_s: float = 30.0,
+    max_chars_per_line: int = 200,
+) -> tuple[list[str], list[str]]:
+    """Build chronological ±2 context strings (`context_before_2`, `context_after_2`) from full raw transcripts.
+
+    Respects single-transcript boundaries and stops at `>pause_cut_s` silence breaks (marking
+    `[>30s pause]` so human coders immediately see why fewer than 2 lines appear).
+    Includes `unknown`/low-confidence turns in chronological order so dialogue flow is preserved.
+    """
+    import numpy as np
+
+    n = len(df)
+    ctx_before = [""] * n
+    ctx_after = [""] * n
+    if n == 0:
+        return ctx_before, ctx_after
+
+    tx_ids = df["transcript_id"].to_numpy()
+    spks = df["speaker"].fillna("unknown").astype(str).tolist()
+    utts = df["utterance"].fillna("").astype(str).tolist()
+    gaps = df["gap_prev_s"].fillna(0.0).to_numpy(dtype=np.float64)
+    confs = df["asr_conf"].to_numpy(dtype=np.float64) if "asr_conf" in df.columns else np.full(n, np.nan)
+
+    def _fmt(idx: int) -> str:
+        spk = spks[idx]
+        c = confs[idx]
+        tag = f"{spk} (low-conf)" if (np.isfinite(c) and c < 0.40) else spk
+        txt = " ".join(utts[idx].split())[:max_chars_per_line]
+        return f"{tag}: {txt}"
+
+    starts = np.flatnonzero(np.r_[True, tx_ids[1:] != tx_ids[:-1]])
+    ends = np.r_[starts[1:], n]
+    for s, e in zip(starts, ends):
+        for i in range(s, e):
+            # Up to 2 turns immediately before `i`
+            pre: list[str] = []
+            j = i - 1
+            while j >= s and len(pre) < 2:
+                if gaps[j + 1] > pause_cut_s:
+                    pre.append(f"[>{int(pause_cut_s)}s pause]")
+                    break
+                pre.append(_fmt(j))
+                j -= 1
+            pre.reverse()
+            ctx_before[i] = "\n".join(pre)
+
+            # Up to 2 turns immediately after `i`
+            post: list[str] = []
+            j = i + 1
+            while j < e and len(post) < 2:
+                if gaps[j] > pause_cut_s:
+                    post.append(f"[>{int(pause_cut_s)}s pause]")
+                    break
+                post.append(_fmt(j))
+                j += 1
+            ctx_after[i] = "\n".join(post)
+
+    return ctx_before, ctx_after

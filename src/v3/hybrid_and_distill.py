@@ -32,7 +32,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.v3.codebook_v3 import infer_subtype_rule
+from src.v3.codebook_v3 import (
+    apply_usf_cluster_and_veto_rules,
+    clean_training_labels_for_usf,
+    infer_subtype_rule,
+)
 from src.v3.embeddings import load_unique_embeddings
 from src.v3.llm_client import UFNavigatorClient
 from src.v3.metrics import (
@@ -159,10 +163,30 @@ def fit_clean_hybrid_fusion(
         0.58 * _safe_logit(s1_y1) + 0.42 * _safe_logit(np.clip(llm_avg_y1, 0.03, 0.97))
     ).astype(np.float32)
 
+    # Also build USF-aligned post-BCTS posterior (soft ±2 cluster -0.60 logit + Stage-2 LLM trap veto -3.5 logit)
+    from src.v3.metrics import oof_bcts_and_thresholds
+    scr_m = df_y2["screened"].to_numpy(dtype=bool)
+    lb_m = df_y2["label"].to_numpy()
+    fld_m = df_y2["fold"].to_numpy()
+    val_m = scr_m & (lb_m != -2)
+    y_bin = (lb_m == 1).astype(int)
+    oof_cal_res = oof_bcts_and_thresholds(oof_hyb_ens, y_bin, fld_m, val_m, recall_targets=(0.90,))
+    oof_hyb_usf, _ = apply_usf_cluster_and_veto_rules(
+        df_y2, oof_cal_res["cal_oof"], llm_scores=llm_avg_y2, llm_eval=eval1_y2,
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+    a_h, b_h = fit_bcts(oof_hyb_ens[val_m], y_bin[val_m], is_probs=True)
+    y1_hyb_usf, _ = apply_usf_cluster_and_veto_rules(
+        df_y1, apply_bcts(y1_hyb_ens, a_h, b_h, is_probs=True),
+        llm_scores=llm_avg_y1, llm_eval=eval1_y1,
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+
     preds_to_eval = {
         "6A_stage2_llm_primary_raw": (res1_y2_scores.astype(np.float32), res1_y1_scores.astype(np.float32)),
         "6A_stage2_llm_dual_avg": (llm_avg_y2.astype(np.float32), llm_avg_y1.astype(np.float32)),
         "6A_hybrid_cascade_v3": (oof_hyb_ens, y1_hyb_ens),
+        "6A_hybrid_cascade_v3_usf": (oof_hyb_usf.astype(np.float32), y1_hyb_usf.astype(np.float32)),
     }
     reports = save_and_evaluate(preds_to_eval, df_y2, df_y1, verbose=verbose)
 
@@ -363,7 +387,7 @@ def run_pgkd_distilled_local(verbose: bool = True) -> dict[str, Any]:
     cb_y2 = get_codebook_feature_matrix(df_y2)
     cb_y1 = get_codebook_feature_matrix(df_y1)
     folds = df_y2["fold"].to_numpy()
-    labels = df_y2["label"].to_numpy()
+    labels = clean_training_labels_for_usf(df_y2)
     screened = df_y2["screened"].to_numpy(dtype=bool)
     gaps_y2 = df_y2["gap_prev_s"].fillna(0.0).to_numpy(dtype=np.float32)
 
@@ -371,11 +395,13 @@ def run_pgkd_distilled_local(verbose: bool = True) -> dict[str, Any]:
     oof_pgkd_gru = np.zeros(n2, dtype=np.float32)
     y1_pgkd_gru = np.zeros(n1, dtype=np.float32)
 
-    # 1. Distilled Standalone Chunk-Batched BiGRU Episode Net (20x faster on CPU, gold 4.5x + Stage-2 silver!)
+    # 1. Distilled Standalone Importance-Sampled Chunk-Batched BiGRU Episode Net (gold 4.5x + Stage-2 silver!)
     chunk_len = 128
-    batch_chunks = 16
+    batch_chunks = 32
+    bg_keep_prob = 0.40
     for f in range(5):
         f_t0 = time.time()
+        rng_f = np.random.default_rng(1500 + f)
         tr_mask = folds != f
         scaler = StandardScaler()
         scaler.fit(cb_y2[tr_mask])
@@ -427,6 +453,12 @@ def run_pgkd_distilled_local(verbose: bool = True) -> dict[str, Any]:
             for c0 in range(0, L, chunk_len):
                 c1 = min(L, c0 + chunk_len)
                 cl = c1 - c0
+                has_sig = bool((lb[c0:c1] >= 0).any() or u0_silver_pos[c0:c1].any())
+                bg_mult = 1.0
+                if not has_sig:
+                    if rng_f.random() > bg_keep_prob:
+                        continue
+                    bg_mult = 1.0 / bg_keep_prob
                 xc = np.zeros((chunk_len, in_dim), dtype=np.float32)
                 yc = np.zeros(chunk_len, dtype=np.float32)
                 wc = np.zeros(chunk_len, dtype=np.float32)
@@ -434,9 +466,9 @@ def run_pgkd_distilled_local(verbose: bool = True) -> dict[str, Any]:
                 emc = np.zeros(chunk_len, dtype=np.float32)
                 xc[:cl] = seq[c0:c1]
                 yc[:cl] = y_t[c0:c1]
-                wc[:cl] = w_t[c0:c1]
+                wc[:cl] = w_t[c0:c1] * bg_mult
                 eyc[:cl] = ep_y_np[c0:c1]
-                emc[:cl] = ep_m_np[c0:c1]
+                emc[:cl] = ep_m_np[c0:c1] * bg_mult
                 tr_chunks_x.append(xc)
                 tr_chunks_y.append(yc)
                 tr_chunks_w.append(wc)
@@ -452,8 +484,8 @@ def run_pgkd_distilled_local(verbose: bool = True) -> dict[str, Any]:
         torch.manual_seed(1500 + f)
         np.random.seed(1500 + f)
         model = BiGRUEpisodeNet(in_dim=in_dim, proj_dim=256, hidden=192, dropout=0.40)
-        opt = torch.optim.AdamW(model.parameters(), lr=1.0e-3, weight_decay=5.0e-2)
-        epochs = 12
+        opt = torch.optim.AdamW(model.parameters(), lr=1.2e-3, weight_decay=5.0e-2)
+        epochs = 8
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
         n_ch = len(X_tr_c)
@@ -495,11 +527,28 @@ def run_pgkd_distilled_local(verbose: bool = True) -> dict[str, Any]:
     oof_pgkd_final = expit(0.45 * _safe_logit(oof_pgkd_gru) + 0.35 * _safe_logit(s1_y2) + 0.20 * _safe_logit(bg_y2)).astype(np.float32)
     y1_pgkd_final = expit(0.45 * _safe_logit(y1_pgkd_gru) + 0.35 * _safe_logit(s1_y1) + 0.20 * _safe_logit(bg_y1)).astype(np.float32)
 
+    from src.v3.metrics import oof_bcts_and_thresholds
+    lb_eval = df_y2["label"].to_numpy()
+    val_m = screened & (lb_eval != -2)
+    y_bin = (lb_eval == 1).astype(int)
+    oof_loc_cal = oof_bcts_and_thresholds(oof_pgkd_final, y_bin, folds, val_m, recall_targets=(0.90,))
+    oof_pgkd_usf, _ = apply_usf_cluster_and_veto_rules(
+        df_y2, oof_loc_cal["cal_oof"], llm_scores=None, llm_eval=None,
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+    a_l, b_l = fit_bcts(oof_pgkd_final[val_m], y_bin[val_m], is_probs=True)
+    y1_pgkd_usf, _ = apply_usf_cluster_and_veto_rules(
+        df_y1, apply_bcts(y1_pgkd_final, a_l, b_l, is_probs=True),
+        llm_scores=None, llm_eval=None,
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+
     print(f"[pgkd] Zero-API distilled local models finished in {time.time() - t0:.1f}s")
     save_and_evaluate(
         {
             "6B_pgkd_distilled_bigru": (oof_pgkd_gru, y1_pgkd_gru),
             "6B_pgkd_distilled_local_v3": (oof_pgkd_final, y1_pgkd_final),
+            "6B_pgkd_distilled_local_v3_usf": (oof_pgkd_usf.astype(np.float32), y1_pgkd_usf.astype(np.float32)),
         },
         df_y2,
         df_y1,
@@ -624,23 +673,30 @@ def export_stratified_recall_audit(n_total: int = 600, seed: int = 20261123) -> 
     out_blind.parent.mkdir(parents=True, exist_ok=True)
 
     df_blind = pd.DataFrame(blind_rows)
-    with pd.ExcelWriter(out_blind, engine="openpyxl") as xl:
-        df_blind.to_excel(xl, sheet_name="BLIND_AUDIT", index=False)
-        ws = xl.sheets["BLIND_AUDIT"]
-        n_r = len(df_blind)
-        dv_lbl = DataValidation(type="list", formula1='"SCIENCE_TALK,NOT_SCIENCE_TALK"', allow_blank=True, showDropDown=False)
-        dv_cnf = DataValidation(type="list", formula1='"1,2,3,4,5"', allow_blank=True, showDropDown=False)
-        ws.add_data_validation(dv_lbl)
-        ws.add_data_validation(dv_cnf)
-        dv_lbl.add(f"J2:J{n_r + 1}")
-        dv_cnf.add(f"K2:K{n_r + 1}")
-        pd.DataFrame([
-            ["BLINDED Horvitz-Thompson Recall Audit (600 Unflagged Y2 Turns)"],
-            ["Rows are randomly shuffled across 5 hidden probability strata."],
-            ["No model scores, strata, or LLM rationales are shown to preserve coding independence."],
-            ["Fill 'review_SCI_or_blank' (SCIENCE_TALK / NOT_SCIENCE_TALK) and 'confidence_1_to_5' using the Sept 2026 Manual."],
-            ["After coding, join on 'audit_row_id' with 'unflagged_recall_audit_SAMPLING_KEY.csv' to compute unbiased Y2 recall & 95% CI."],
-        ]).to_excel(xl, sheet_name="INSTRUCTIONS", index=False, header=False)
+    try:
+        with pd.ExcelWriter(out_blind, engine="openpyxl") as xl:
+            df_blind.to_excel(xl, sheet_name="BLIND_AUDIT", index=False)
+            ws = xl.sheets["BLIND_AUDIT"]
+            n_r = len(df_blind)
+            dv_lbl = DataValidation(type="list", formula1='"SCIENCE_TALK,NOT_SCIENCE_TALK"', allow_blank=True, showDropDown=False)
+            dv_cnf = DataValidation(type="list", formula1='"1,2,3,4,5"', allow_blank=True, showDropDown=False)
+            ws.add_data_validation(dv_lbl)
+            ws.add_data_validation(dv_cnf)
+            dv_lbl.add(f"J2:J{n_r + 1}")
+            dv_cnf.add(f"K2:K{n_r + 1}")
+            pd.DataFrame([
+                ["BLINDED Horvitz-Thompson Recall Audit (600 Unflagged Y2 Turns)"],
+                ["Rows are randomly shuffled across 5 hidden probability strata."],
+                ["No model scores, strata, or LLM rationales are shown to preserve coding independence."],
+                ["Fill 'review_SCI_or_blank' (SCIENCE_TALK / NOT_SCIENCE_TALK) and 'confidence_1_to_5' using the Sept 2026 Manual."],
+                ["After coding, join on 'audit_row_id' with 'unflagged_recall_audit_SAMPLING_KEY.csv' to compute unbiased Y2 recall & 95% CI."],
+            ]).to_excel(xl, sheet_name="INSTRUCTIONS", index=False, header=False)
+    except PermissionError:
+        alt_blind = REPORTS_V3 / "unflagged_recall_audit_BLIND_coder_sheet_v3_1.xlsx"
+        with pd.ExcelWriter(alt_blind, engine="openpyxl") as xl:
+            df_blind.to_excel(xl, sheet_name="BLIND_AUDIT", index=False)
+        out_blind = alt_blind
+        print(f"[audit_export] WARN: original file open in Excel; wrote refreshed copy -> {alt_blind}", flush=True)
 
     pd.DataFrame(key_rows).to_csv(out_key, index=False)
     # Remove old unblinded file if present to avoid accidental unblinded coding!
@@ -677,7 +733,30 @@ def refit_fusion_and_local_blend_only(verbose: bool = True) -> None:
 
     loc_y2 = expit(0.45 * _safe_logit(pg_y2) + 0.35 * _safe_logit(s1_y2) + 0.20 * _safe_logit(bg_y2)).astype(np.float32)
     loc_y1 = expit(0.45 * _safe_logit(pg_y1) + 0.35 * _safe_logit(s1_y1) + 0.20 * _safe_logit(bg_y1)).astype(np.float32)
-    save_and_evaluate({"6B_pgkd_distilled_local_v3": (loc_y2, loc_y1)}, df_y2, df_y1, verbose=verbose)
+
+    from src.v3.metrics import oof_bcts_and_thresholds
+    scr_m = df_y2["screened"].to_numpy(dtype=bool)
+    lb_m = df_y2["label"].to_numpy()
+    fld_m = df_y2["fold"].to_numpy()
+    val_m = scr_m & (lb_m != -2)
+    y_bin = (lb_m == 1).astype(int)
+    oof_lc = oof_bcts_and_thresholds(loc_y2, y_bin, fld_m, val_m, recall_targets=(0.90,))
+    loc_usf_y2, _ = apply_usf_cluster_and_veto_rules(
+        df_y2, oof_lc["cal_oof"], llm_scores=None, llm_eval=None,
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+    a_l, b_l = fit_bcts(loc_y2[val_m], y_bin[val_m], is_probs=True)
+    loc_usf_y1, _ = apply_usf_cluster_and_veto_rules(
+        df_y1, apply_bcts(loc_y1, a_l, b_l, is_probs=True), llm_scores=None, llm_eval=None,
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+    save_and_evaluate(
+        {
+            "6B_pgkd_distilled_local_v3": (loc_y2, loc_y1),
+            "6B_pgkd_distilled_local_v3_usf": (loc_usf_y2.astype(np.float32), loc_usf_y1.astype(np.float32)),
+        },
+        df_y2, df_y1, verbose=verbose,
+    )
     export_stratified_recall_audit(n_total=600)
 
 

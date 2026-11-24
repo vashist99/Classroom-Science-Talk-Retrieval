@@ -42,7 +42,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.v3.codebook_v3 import extract_codebook_features, infer_subtype_rule
+from src.v3.codebook_v3 import (
+    apply_usf_cluster_and_veto_rules,
+    clean_training_labels_for_usf,
+    extract_codebook_features,
+    extract_pm2_context_columns,
+    infer_subtype_rule,
+)
 from src.v3.dataset import parse_transcription, to_seconds
 from src.v3.embeddings import build_pause_bounded_context_matrix, load_unique_embeddings
 from src.v3.export_workbooks import LABEL_NOT, LABEL_SCIENCE, child_id_from_filename, write_human_coded_workbook
@@ -224,7 +230,8 @@ def train_deployable_artifacts(verbose: bool = True) -> Path:
 
     scr = df_y2["screened"].to_numpy(dtype=bool)
     folds = df_y2["fold"].to_numpy()
-    labels = df_y2["label"].to_numpy()
+    labels_eval = df_y2["label"].to_numpy()
+    labels = clean_training_labels_for_usf(df_y2)  # Cleaned STRICTLY for training folds!
     gaps = df_y2["gap_prev_s"].fillna(0.0).to_numpy(dtype=np.float32)
     cb_y2 = get_codebook_feature_matrix(df_y2)
     cb_y1 = get_codebook_feature_matrix(df_y1)
@@ -240,12 +247,24 @@ def train_deployable_artifacts(verbose: bool = True) -> Path:
         llm_cons = 0.60 * llm1 + 0.40 * llm2
         llm_cons_y1 = 0.60 * llm1_y1 + 0.40 * llm2_y1
         eval_s2 = npz["eval1_y2"].astype(bool)
+        eval_s2_y1 = npz["eval1_y1"].astype(bool)
     else:
         llm1 = llm2 = llm_cons = np.zeros(len(df_y2), dtype=np.float32)
         llm1_y1 = llm2_y1 = llm_cons_y1 = np.zeros(len(df_y1), dtype=np.float32)
         eval_s2 = np.zeros(len(df_y2), dtype=bool)
+        eval_s2_y1 = np.zeros(len(df_y1), dtype=bool)
 
-    # 1. Exact 5-fold OOF of portable Nomic-only BiGRU (for leak-free threshold & BCTS calibration!)
+    # 1. Exact 5-fold OOF of portable Nomic-only bundle (TF-IDF + Nomic LogReg + PGKD BiGRU)
+    #    AND save EVERY held-out classroom fold model under `models/v3/fold_models/` so scoring
+    #    any of the 650 Y2 transcripts automatically uses the held-out fold that NEVER saw that classroom!
+    fold_dir = MODELS_DIR / "fold_models"
+    fold_dir.mkdir(parents=True, exist_ok=True)
+    _VETO_ONLY = {"cb_trap_shape_only", "cb_trap_count_only", "cb_trap_look_no_content"}
+    cb_cols_keep = [c for c in df_y2.columns if c.startswith("cb_") and c not in _VETO_ONLY]
+
+    t_txt, c_txt = build_pause_bounded_window_texts(df_y2, before=5, after=3, pause_cut_s=30.0)
+    X_nom_ctx_all = build_pause_bounded_context_matrix(df_y2, nomic_u, uids_y2, pause_cut_s=30.0, pca_dim=256)
+
     oof_port_gru = np.zeros(len(df_y2), dtype=np.float32)
     y1_port_gru = np.zeros(len(df_y1), dtype=np.float32)
     for f in range(5):
@@ -268,8 +287,48 @@ def train_deployable_artifacts(verbose: bool = True) -> Path:
             for x_np, (s, e) in zip(seqs1_f, spans1_f):
                 tl, _ = g_f(torch.from_numpy(x_np).unsqueeze(0))
                 y1_port_gru[s:e] += torch.sigmoid(tl.squeeze(0)).numpy() / 5.0
+
+        # Also fit & save fold-strict TF-IDF + Nomic LogReg + BiGRU so Y2 sibling files have ZERO same-room leakage!
+        pos_f = np.flatnonzero(tr_m & scr & (labels == 1))
+        bn_f = np.flatnonzero(tr_m & scr & (labels == 0))
+        if has_pgkd:
+            u0_spos_f = np.flatnonzero(tr_m & scr & (labels == -1) & eval_s2 & (llm1 >= 0.70) & (llm2 >= 0.60))
+            u0_sneg_f = np.flatnonzero(tr_m & scr & (labels == -1) & ((~eval_s2) | (llm_cons <= 0.12)))
+        else:
+            u0_spos_f = np.array([], dtype=int)
+            u0_sneg_f = np.flatnonzero(tr_m & scr & (labels == -1))
+        rng_f = np.random.default_rng(2200 + f)
+        u0_pick_f = rng_f.choice(u0_sneg_f, size=min(len(u0_sneg_f), 4 * (len(pos_f) + len(bn_f))), replace=False)
+        tr_idx_f = np.concatenate([pos_f, u0_spos_f, bn_f, u0_pick_f])
+        tr_y_f = np.concatenate([np.ones(len(pos_f)), np.ones(len(u0_spos_f)), np.zeros(len(bn_f)), np.zeros(len(u0_pick_f))]).astype(int)
+        bn_wf = np.where(llm_cons[bn_f] >= 0.70, 0.35, 1.0) if has_pgkd else np.ones(len(bn_f))
+        tr_w_f = np.concatenate([np.full(len(pos_f), 3.5), np.full(len(u0_spos_f), 1.0), bn_wf, np.full(len(u0_pick_f), 0.30)]).astype(np.float32)
+
+        vec_tw_f = TfidfVectorizer(ngram_range=(1, 3), min_df=2, max_features=35000, sublinear_tf=True)
+        vec_tc_f = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), min_df=3, max_features=25000, sublinear_tf=True)
+        vec_cw_f = TfidfVectorizer(ngram_range=(1, 2), min_df=3, max_features=25000, sublinear_tf=True)
+        X_lex_f = sparse.hstack([
+            vec_tw_f.fit_transform([t_txt[i] for i in tr_idx_f]),
+            vec_tc_f.fit_transform([t_txt[i] for i in tr_idx_f]),
+            vec_cw_f.fit_transform([c_txt[i] for i in tr_idx_f]) * 0.85,
+            sparse.csr_matrix(cb2_f[tr_idx_f]),
+        ], format="csr")
+        clf_lex_f = LogisticRegression(C=1.2, max_iter=500, solver="lbfgs").fit(X_lex_f, tr_y_f, sample_weight=tr_w_f)
+        X_nom_f = np.hstack([X_nom_ctx_all[tr_idx_f], nomic_u[uids_y2[tr_idx_f]].astype(np.float32), cb2_f[tr_idx_f]])
+        clf_nom_f = LogisticRegression(C=0.4, max_iter=400, solver="lbfgs").fit(X_nom_f, tr_y_f, sample_weight=tr_w_f)
+
+        with (fold_dir / f"portable_models_fold_{f}.pkl").open("wb") as fh:
+            pickle.dump({
+                "scaler": sc_f, "cb_cols": cb_cols_keep,
+                "vec_tw": vec_tw_f, "vec_tc": vec_tc_f, "vec_cw": vec_cw_f,
+                "clf_lex": clf_lex_f, "clf_nomic": clf_nom_f,
+            }, fh)
+        torch.save(
+            {"in_dim": seqs2_f[0].shape[1], "proj_dim": 160, "hidden": 128, "state_dict": g_f.state_dict()},
+            fold_dir / f"pgkd_bigru_fold_{f}.pt",
+        )
         if verbose:
-            print(f"  [deploy_oof] Portable Nomic PGKD BiGRU fold {f}/4 done ({time.time() - t0:.1f}s)", flush=True)
+            print(f"  [deploy_oof] Saved held-out classroom fold {f}/4 bundle ({time.time() - t0:.1f}s)", flush=True)
 
     # Combine with ALREADY strictly fold-isolated OOFs of 1B_nomic_ctx_logreg & 0B_tfidf_context!
     p_nom_lr_oof = np.load(PREDS_DIR / "1B_nomic_ctx_logreg_y2_oof.npy").astype(np.float32)
@@ -292,31 +351,61 @@ def train_deployable_artifacts(verbose: bool = True) -> Path:
         0.58 * _safe_logit(y1_port_local) + 0.42 * _safe_logit(np.clip(llm_cons_y1, 0.03, 0.97))
     ).astype(np.float32)
 
-    # Evaluate exact portable OOF metrics & calibrate exact BCTS + thresholds!
-    ev_loc = evaluate_y2_oof(df_y2, oof_port_local, model_name="portable_local_v3", calibrate_oof=True)
-    ev_hyb = evaluate_y2_oof(df_y2, oof_port_hyb, model_name="portable_hybrid_v3", calibrate_oof=True)
+    # Evaluate exact portable OOF metrics & calibrate exact BCTS + USF ±2 cluster/veto thresholds!
+    valid_all = scr & (labels_eval != -2)
+    y_all = (labels_eval == 1).astype(int)
+    rev_m = scr & np.isin(labels_eval, [0, 1])
 
-    valid_all = scr & (labels != -2)
-    y_all = (labels == 1).astype(int)
-    rev_m = scr & np.isin(labels, [0, 1])
+    # Strictly fold-isolated OOF BCTS -> USF ±2 cluster (-0.60 logit) & Stage-2 LLM veto -> OOF thresholds!
+    oof_loc_res = oof_bcts_and_thresholds(oof_port_local, y_all, folds, valid_all, recall_targets=(0.90,))
+    oof_hyb_res = oof_bcts_and_thresholds(oof_port_hyb, y_all, folds, valid_all, recall_targets=(0.90,))
+
+    cal_oof_loc_adj, _ = apply_usf_cluster_and_veto_rules(
+        df_y2, oof_loc_res["cal_oof"], llm_scores=None, llm_eval=None,
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+    cal_oof_hyb_adj, _ = apply_usf_cluster_and_veto_rules(
+        df_y2, oof_hyb_res["cal_oof"],
+        llm_scores=(llm_cons if has_pgkd else None),
+        llm_eval=(eval_s2 if has_pgkd else None),
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+
+    ev_loc = evaluate_y2_oof(df_y2, cal_oof_loc_adj, model_name="portable_local_v3_usf", calibrate_oof=False)
+    ev_hyb = evaluate_y2_oof(df_y2, cal_oof_hyb_adj, model_name="portable_hybrid_v3_usf", calibrate_oof=False)
+
+    # Tune standalone & screening thresholds strictly OOF on CLEAN USF labels (`labels != -2`, excluding
+    # the 85 vetoed legacy shape/count/bare-look TPs so Screening R>=90% doesn't collapse to recapture traps!)
+    valid_usf = scr & (labels != -2)
+    y_usf = (labels == 1).astype(int)
 
     a_loc, b_loc = fit_bcts(oof_port_local[valid_all], y_all[valid_all], is_probs=True)
     cal_loc_all = apply_bcts(oof_port_local, a_loc, b_loc, is_probs=True)
-    thr_stand_loc = float(ev_loc["full_corpus_175k"]["mean_thr_full_standalone"])
-    thr_screen_loc = float(ev_loc["full_corpus_175k"]["mean_thr_full_screen90"])
-    thr_s1_gate = tune_threshold_recall(labels[rev_m], cal_loc_all[rev_m], 0.96)
+    thr_stand_loc = float(np.mean([tune_threshold_f1(y_usf[valid_usf & (folds != f)], cal_oof_loc_adj[valid_usf & (folds != f)]) for f in range(5)]))
+    thr_screen_loc = float(np.mean([tune_threshold_recall(y_usf[valid_usf & (folds != f)], cal_oof_loc_adj[valid_usf & (folds != f)], 0.90) for f in range(5)]))
+    thr_s1_gate = tune_threshold_recall(y_usf[rev_m & valid_usf], cal_loc_all[rev_m & valid_usf], 0.96)
 
     a_hyb, b_hyb = fit_bcts(oof_port_hyb[valid_all], y_all[valid_all], is_probs=True)
-    thr_stand_hyb = float(ev_hyb["full_corpus_175k"]["mean_thr_full_standalone"])
-    thr_screen_hyb = float(ev_hyb["full_corpus_175k"]["mean_thr_full_screen90"])
+    thr_stand_hyb = float(np.mean([tune_threshold_f1(y_usf[valid_usf & (folds != f)], cal_oof_hyb_adj[valid_usf & (folds != f)]) for f in range(5)]))
+    thr_screen_hyb = float(np.mean([tune_threshold_recall(y_usf[valid_usf & (folds != f)], cal_oof_hyb_adj[valid_usf & (folds != f)], 0.90) for f in range(5)]))
 
-    ev_loc_y1 = evaluate_y1_full_recall(
+    y1_loc_adj, _ = apply_usf_cluster_and_veto_rules(
         df_y1, apply_bcts(y1_port_local, a_loc, b_loc, is_probs=True),
-        thr_standalone=thr_stand_loc, thr_screen90=thr_screen_loc, model_name="portable_local_v3",
+        llm_scores=None, llm_eval=None, support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+    y1_hyb_adj, _ = apply_usf_cluster_and_veto_rules(
+        df_y1, apply_bcts(y1_port_hyb, a_hyb, b_hyb, is_probs=True),
+        llm_scores=(llm_cons_y1 if has_pgkd else None),
+        llm_eval=(eval_s2_y1 if has_pgkd else None),
+        support_thr=0.05, min_cluster=3, penalty_logit=0.60, pause_cut_s=30.0,
+    )
+    ev_loc_y1 = evaluate_y1_full_recall(
+        df_y1, y1_loc_adj,
+        thr_standalone=thr_stand_loc, thr_screen90=thr_screen_loc, model_name="portable_local_v3_usf",
     )
     ev_hyb_y1 = evaluate_y1_full_recall(
-        df_y1, apply_bcts(y1_port_hyb, a_hyb, b_hyb, is_probs=True),
-        thr_standalone=thr_stand_hyb, thr_screen90=thr_screen_hyb, model_name="portable_hybrid_v3",
+        df_y1, y1_hyb_adj,
+        thr_standalone=thr_stand_hyb, thr_screen90=thr_screen_hyb, model_name="portable_hybrid_v3_usf",
     )
     if verbose:
         print(
@@ -332,11 +421,10 @@ def train_deployable_artifacts(verbose: bool = True) -> Path:
             flush=True,
         )
 
-    # 2. Fit full-data models on 100% of verified Y2 data (+ PGKD silver) for deployment!
+    # 2. Fit full-data models on 100% of verified Y2 data (+ PGKD silver) for brand-new unseen classrooms!
     scaler = StandardScaler()
     cb_sc = (scaler.fit_transform(cb_y2) * 0.20).astype(np.float32)
 
-    t_txt, c_txt = build_pause_bounded_window_texts(df_y2, before=5, after=3, pause_cut_s=30.0)
     pos_i = np.flatnonzero(scr & (labels == 1))
     bn_i = np.flatnonzero(scr & (labels == 0))
     if has_pgkd:
@@ -366,8 +454,7 @@ def train_deployable_artifacts(verbose: bool = True) -> Path:
     clf_lex = LogisticRegression(C=1.2, max_iter=500, solver="lbfgs").fit(X_lex, tr_y_bin, sample_weight=tr_w)
 
     # Full-data 1B Nomic Multi-Scale Context LogReg (replaces ContextMLP -> +0.16 Y1 PR-AUC!)
-    X_nom_ctx = build_pause_bounded_context_matrix(df_y2, nomic_u, uids_y2, pause_cut_s=30.0, pca_dim=256)
-    X_nom_full = np.hstack([X_nom_ctx[tr_idx], nomic_u[uids_y2[tr_idx]].astype(np.float32), cb_sc[tr_idx]])
+    X_nom_full = np.hstack([X_nom_ctx_all[tr_idx], nomic_u[uids_y2[tr_idx]].astype(np.float32), cb_sc[tr_idx]])
     clf_nomic = LogisticRegression(C=0.4, max_iter=400, solver="lbfgs").fit(X_nom_full, tr_y_bin, sample_weight=tr_w)
 
     # Full-data Portable PGKD BiGRU-Episode Net
@@ -385,10 +472,11 @@ def train_deployable_artifacts(verbose: bool = True) -> Path:
         primary_llm = meta_s2.get("primary_llm", primary_llm)
         secondary_llm = meta_s2.get("secondary_llm", secondary_llm)
 
+    _VETO_ONLY = {"cb_trap_shape_only", "cb_trap_count_only", "cb_trap_look_no_content"}
     with (MODELS_DIR / "portable_models.pkl").open("wb") as fh:
         pickle.dump({
             "scaler": scaler,
-            "cb_cols": [c for c in df_y2.columns if c.startswith("cb_")],
+            "cb_cols": [c for c in df_y2.columns if c.startswith("cb_") and c not in _VETO_ONLY],
             "vec_tw": vec_tw,
             "vec_tc": vec_tc,
             "vec_cw": vec_cw,
@@ -403,11 +491,20 @@ def train_deployable_artifacts(verbose: bool = True) -> Path:
     (MODELS_DIR / "nomic_ctx_mlp.pt").unlink(missing_ok=True)
     (MODELS_DIR / "lexical_and_scaler.pkl").unlink(missing_ok=True)
 
+    # Save exact classroom -> fold map so `score` routes ANY Y2 training classroom to its held-out fold!
+    room_to_fold = {
+        str(room): int(g["fold"].iloc[0])
+        for room, g in df_y2.groupby("classroom")
+    }
+
     cfg = {
-        "bundle_version": "v3_portable_calibrated",
+        "bundle_version": "v3.1_usf_pm2_veto_5fold_leakfree",
         "has_pgkd_distillation": has_pgkd,
+        "has_heldout_fold_models": True,
+        "classroom_to_fold": room_to_fold,
         "local_weights": {"pgkd_bigru": 0.55, "nomic_ctx_logreg": 0.33, "tfidf_ctx_logreg": 0.12},
         "hybrid_weights": {"stage1_local_logit": 0.58, "stage2_llm_logit": 0.42},
+        "usf_pm2_cluster": {"support_thr": 0.05, "min_cluster": 3, "penalty_logit": 0.60, "pause_cut_s": 30.0},
         "bcts_local": {"a": a_loc, "b": b_loc},
         "bcts_hybrid": {"a": a_hyb, "b": b_hyb},
         "thr_local_standalone": round(thr_stand_loc, 4),
@@ -521,6 +618,12 @@ def load_raw_transcript_folder(folder_path: Path) -> pd.DataFrame:
     return out
 
 
+def _extract_classroom_id(folder_name: str) -> str | None:
+    import re
+    m = re.match(r"Classroom(\w+?)_(\d{6})", str(folder_name), flags=re.I)
+    return m.group(1) if m else None
+
+
 def score_new_folder(
     input_dir: Path,
     output_dir: Path,
@@ -530,13 +633,42 @@ def score_new_folder(
     budget_cap_usd: float = 5.0,
     science_only: bool = True,
     use_secondary_verifier: bool = True,
+    force_full_model: bool = False,
 ) -> dict[str, Any]:
-    """Score a brand-new unseen classroom transcript folder and write Human coded workbooks."""
+    """Score a classroom transcript folder and write 21-column Human coded workbooks.
+
+    Zero-leakage classroom routing:
+      - If `input_dir` matches one of the 83 Y2 training classrooms (e.g., scoring the other
+        567 sibling-child Y2 files!), automatically loads `models/v3/fold_models/fold_{f}`
+        which NEVER saw a single utterance from that classroom during training!
+      - If `input_dir` is a brand-new unseen classroom (or `force_full_model=True`), loads
+        the full 83-room bundle (`models/v3/portable_models.pkl` + `pgkd_bigru.pt`).
+    """
     if not (MODELS_DIR / "deploy_config.json").exists():
         raise FileNotFoundError(f"Missing {MODELS_DIR / 'deploy_config.json'}. Run `train-artifacts` first.")
 
     cfg = json.loads((MODELS_DIR / "deploy_config.json").read_text(encoding="utf-8"))
-    with (MODELS_DIR / "portable_models.pkl").open("rb") as fh:
+    room_id = _extract_classroom_id(input_dir.name)
+    room_to_fold = cfg.get("classroom_to_fold", {})
+    fold_dir = MODELS_DIR / "fold_models"
+
+    if (
+        not force_full_model
+        and room_id is not None
+        and room_id in room_to_fold
+        and (fold_dir / f"portable_models_fold_{room_to_fold[room_id]}.pkl").exists()
+        and (fold_dir / f"pgkd_bigru_fold_{room_to_fold[room_id]}.pt").exists()
+    ):
+        held_f = int(room_to_fold[room_id])
+        pkl_path = fold_dir / f"portable_models_fold_{held_f}.pkl"
+        gru_path = fold_dir / f"pgkd_bigru_fold_{held_f}.pt"
+        model_selection = f"held_out_fold_{held_f} (zero same-classroom leakage for Y2 classroom {room_id})"
+    else:
+        pkl_path = MODELS_DIR / "portable_models.pkl"
+        gru_path = MODELS_DIR / "pgkd_bigru.pt"
+        model_selection = f"full_83_room_bundle ({'forced' if force_full_model else 'brand-new unseen classroom'})"
+
+    with pkl_path.open("rb") as fh:
         bundle = pickle.load(fh)
 
     df = load_raw_transcript_folder(input_dir)
@@ -574,9 +706,9 @@ def score_new_folder(
     X_nom_full = np.hstack([X_nom_ctx, nomic_u[uids].astype(np.float32), cb_sc])
     p_nom = bundle["clf_nomic"].predict_proba(X_nom_full)[:, 1].astype(np.float32)
 
-    # 3. Portable PGKD BiGRU-Episode Net
+    # 3. Portable PGKD BiGRU-Episode Net (held-out classroom fold or full bundle!)
     seqs, spans = _build_nomic_only_sequences(df, nomic_u, uids, cb_sc)
-    ck_g = torch.load(MODELS_DIR / "pgkd_bigru.pt", map_location="cpu", weights_only=True)
+    ck_g = torch.load(gru_path, map_location="cpu", weights_only=True)
     bigru = BiGRUEpisodeNet(
         in_dim=ck_g["in_dim"],
         proj_dim=int(ck_g.get("proj_dim", 256)),
@@ -602,9 +734,10 @@ def score_new_folder(
 
     screened_mask = df["screened"].to_numpy(dtype=bool)
     llm_scores = np.full(len(df), np.nan)
+    llm_eval_mask: np.ndarray | None = None
     llm_rats = [""] * len(df)
     llm_subs = [""] * len(df)
-    final_scores = cal_local.copy()
+    cal_unadjusted = cal_local.copy()
     scored_by = "local_v3"
 
     if engine == "hybrid":
@@ -635,19 +768,36 @@ def score_new_folder(
                     if not llm_subs[i] and res2["subtype"][i]:
                         llm_subs[i] = res2["subtype"][i]
 
-        llm_scores = np.where(res1["evaluated"], llm_comb, np.nan)
+        llm_eval_mask = res1["evaluated"].astype(bool)
+        llm_scores = np.where(llm_eval_mask, llm_comb, np.nan)
         w_h = cfg["hybrid_weights"]
         raw_hyb = expit(
             w_h["stage1_local_logit"] * _safe_logit(raw_local)
             + w_h["stage2_llm_logit"] * _safe_logit(np.clip(llm_comb, 0.03, 0.97))
         )
-        final_scores = apply_bcts(raw_hyb, cfg["bcts_hybrid"]["a"], cfg["bcts_hybrid"]["b"], is_probs=True)
+        cal_unadjusted = apply_bcts(raw_hyb, cfg["bcts_hybrid"]["a"], cfg["bcts_hybrid"]["b"], is_probs=True)
         scored_by = "hybrid_v3"
+
+    # Apply USF ±2 chronological cluster rule (-0.60 logit if <3 turns in ±2) & Stage-2 LLM trap veto!
+    pm2_cfg = cfg.get("usf_pm2_cluster", {"support_thr": 0.05, "min_cluster": 3, "penalty_logit": 0.60, "pause_cut_s": 30.0})
+    final_scores, pm2_cnt = apply_usf_cluster_and_veto_rules(
+        df,
+        cal_unadjusted,
+        llm_scores=(np.nan_to_num(llm_scores, nan=0.02) if engine == "hybrid" else None),
+        llm_eval=llm_eval_mask,
+        support_thr=float(pm2_cfg["support_thr"]),
+        min_cluster=int(pm2_cfg["min_cluster"]),
+        penalty_logit=float(pm2_cfg["penalty_logit"]),
+        pause_cut_s=float(pm2_cfg["pause_cut_s"]),
+    )
+    # Build chronological ±2 context strings from ALL turns (before screening filter!)
+    ctx_before_2, ctx_after_2 = extract_pm2_context_columns(df, pause_cut_s=float(pm2_cfg["pause_cut_s"]))
 
     modes_to_run = ["screening", "standalone"] if mode == "both" else [mode]
     all_files = sorted(df["source_file"].unique().tolist())
     out_summary: dict[str, Any] = {
         "folder": input_dir.name,
+        "model_selection": model_selection,
         "n_turns_total": int(len(df)),
         "n_turns_screened": int(screened_mask.sum()),
         "engine": engine,
@@ -675,11 +825,14 @@ def score_new_folder(
                 "seg_start": str(df["seg_start"].iat[gi]),
                 "seg_end": str(df["seg_end"].iat[gi]),
                 "speaker": str(df["speaker"].iat[gi]),
+                "context_before_2": ctx_before_2[gi],
                 "utterance": str(df["utterance"].iat[gi]),
+                "context_after_2": ctx_after_2[gi],
                 "confidence": None if pd.isna(df["asr_conf"].iat[gi]) else round(float(df["asr_conf"].iat[gi]), 3),
                 "predicted_label": lbl,
                 "review": None,
                 "score": round(sc, 4),
+                "pm2_sci_count": int(pm2_cnt[gi]),
                 "scored_by": scored_by,
                 "cosine_score": round(float(cal_local[gi]), 4),
                 "llm_score": None if np.isnan(llm_scores[gi]) else round(float(llm_scores[gi]), 4),
@@ -696,7 +849,7 @@ def score_new_folder(
         )
         out_summary["modes"][m] = {"workbook": str(wb_path), "threshold": thr, "predicted_science": n_sci}
 
-    cal_mean_pct = round(100.0 * float(final_scores[screened_mask].mean()), 2) if screened_mask.any() else 0.0
+    cal_mean_pct = round(100.0 * float(cal_unadjusted[screened_mask].mean()), 2) if screened_mask.any() else 0.0
     out_summary["calibrated_mean_science_pct"] = cal_mean_pct
     out_summary["ledger"] = client.ledger.summary()
     print(json.dumps(out_summary, indent=2))
@@ -715,6 +868,7 @@ def main() -> None:
     sc.add_argument("--budget", type=float, default=5.0)
     sc.add_argument("--no-secondary", action="store_true", help="Use only Primary LLM in hybrid mode")
     sc.add_argument("--full-transcript", action="store_true")
+    sc.add_argument("--force-full-model", action="store_true", help="Force full 83-room bundle even if classroom is in Y2 training rooms")
 
     args = ap.parse_args()
     if args.cmd == "train-artifacts":
@@ -726,6 +880,7 @@ def main() -> None:
             budget_cap_usd=args.budget,
             science_only=not args.full_transcript,
             use_secondary_verifier=not args.no_secondary,
+            force_full_model=args.force_full_model,
         )
 
 

@@ -43,8 +43,8 @@ DATA_DIR = PROJECT_ROOT / "data" / "v3"
 PREDS_DIR = PROJECT_ROOT / "reports" / "v3" / "stage1_preds"
 S2_DIR = PROJECT_ROOT / "reports" / "v3" / "stage2_llm"
 
-PROMPT_VERSION_WINDOW = "v3_manual_win_v2"
-PROMPT_VERSION_ADJ = "v3_manual_adj_v1"
+PROMPT_VERSION_WINDOW = "v3_manual_win_v3"
+PROMPT_VERSION_ADJ = "v3_manual_adj_v2"
 
 
 # ---------------------------------------------------------------------------

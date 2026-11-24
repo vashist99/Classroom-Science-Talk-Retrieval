@@ -1,19 +1,23 @@
-"""Exact 18-column `Human coded` Excel workbook exporter (fixes child_base collision bug!).
+"""21-column `Human coded` Excel workbook exporter with chronological ±2 context (fixes child_base collision bug!).
 
-Schema guaranteed 100% identical to Human coded/*.xlsx so Dr. Hadley's review process
-and Data Aggregation/aggregate_human_coded.py work out-of-the-box:
-  ['line_no', 'seg_start', 'seg_end', 'speaker', 'child_id', 'utterance',
-   'confidence', 'predicted_label', 'review', 'score', 'scored_by',
-   'cosine_score', 'llm_score', 'top_match_in_corpus', 'top_match_score',
-   'predicted_subtype', 'rationale', 'degraded']
+Fully compatible with Dr. Hadley's review process and Data Aggregation/aggregate_human_coded.py
+(which reads all columns strictly by header name):
+  ['line_no', 'seg_start', 'seg_end', 'speaker', 'child_id',
+   'context_before_2', 'utterance', 'context_after_2',
+   'confidence', 'predicted_label', 'review', 'score', 'pm2_sci_count',
+   'scored_by', 'cosine_score', 'llm_score', 'top_match_in_corpus',
+   'top_match_score', 'predicted_subtype', 'rationale', 'degraded']
 
-Fixes vs legacy src/deploy_y2_12.py:
+Fixes & upgrades vs legacy src/deploy_y2_12.py:
   1. Pre-assigns deterministic sheet names across ALL source files in a classroom
      folder BEFORE filtering to SCIENCE_TALK rows -> eliminates the `child_base`
      sheet-name shifting bug confirmed in Classroom46_111825.xlsx!
-  2. Supports both `screening` (high-recall human-review) and `standalone`
+  2. Displays pause-bounded chronological `±2` utterances (`context_before_2` and
+     `context_after_2`) right beside `utterance` with wrap-text enabled, plus
+     `pm2_sci_count` (count of science-leaning turns in the 5-turn ±2 window).
+  3. Supports both `screening` (high-recall human-review) and `standalone`
      (calibrated max-F1 automated counts) operating thresholds cleanly.
-  3. Includes exact dropdown validation on `review`, bottom agreement tally formulas,
+  4. Includes exact dropdown validation on `review`, bottom agreement tally formulas,
      and an updated `INSTRUCTIONS` sheet.
 """
 from __future__ import annotations
@@ -33,11 +37,14 @@ HUMAN_CODED_COLS = [
     "seg_end",
     "speaker",
     "child_id",
+    "context_before_2",
     "utterance",
+    "context_after_2",
     "confidence",
     "predicted_label",
     "review",
     "score",
+    "pm2_sci_count",
     "scored_by",
     "cosine_score",
     "llm_score",
@@ -80,6 +87,7 @@ def assign_deterministic_sheet_names(source_files: list[str]) -> dict[str, str]:
 
 
 def _add_review_tools(ws, *, n_rows: int) -> None:
+    from openpyxl.styles import Alignment
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.datavalidation import DataValidation
 
@@ -104,6 +112,23 @@ def _add_review_tools(ws, *, n_rows: int) -> None:
     ws.add_data_validation(dv)
     dv.add(rev_rng)
 
+    # Clean wrap-text & column widths so chronological ±2 context reads naturally
+    col_widths = {
+        "context_before_2": 42,
+        "utterance": 46,
+        "context_after_2": 42,
+        "pm2_sci_count": 14,
+        "rationale": 42,
+    }
+    wrap_align = Alignment(wrap_text=True, vertical="top")
+    for cname, width in col_widths.items():
+        if cname in HUMAN_CODED_COLS:
+            ci = HUMAN_CODED_COLS.index(cname) + 1
+            ws.column_dimensions[get_column_letter(ci)].width = width
+            if cname != "pm2_sci_count":
+                for r in range(first, last + 1):
+                    ws.cell(row=r, column=ci).alignment = wrap_align
+
     s = last + 2
     ws.cell(row=s, column=1, value="Reviewed (non-blank):")
     ws.cell(row=s, column=2, value=f'=COUNTIF({rev_rng},"<>")')
@@ -115,7 +140,7 @@ def _add_review_tools(ws, *, n_rows: int) -> None:
 
 def _build_instructions(mode: str, threshold: float, engine: str, science_only: bool) -> list[list[str]]:
     lines = [
-        ["Y2 science-talk scoring (TeLI v3 Context-Aware Pipeline) — review guide"],
+        ["Y2 science-talk scoring (TeLI v3.1 Context-Aware Pipeline) — review guide"],
         [""],
         [f"Engine: {engine} | Operating mode: {mode} (threshold={threshold:.3f})"],
         ["Each sheet is one child's point-of-view recorder for this classroom session."],
@@ -126,15 +151,19 @@ def _build_instructions(mode: str, threshold: float, engine: str, science_only: 
         lines.append(["Sheets contain all kept classroom utterances in chronological line_no order."])
     lines += [
         [""],
-        ["Columns (exact Human coded 18-column schema):"],
-        ["  predicted_label  : SCIENCE_TALK / NOT_SCIENCE_TALK from the calibrated v3 pipeline."],
+        ["Columns (21-column Human coded + ±2 chronological context schema):"],
+        ["  context_before_2 : Up to 2 immediately preceding chronological turns from the full raw transcript (stops at >30s pauses)."],
+        ["  utterance        : Target utterance being reviewed."],
+        ["  context_after_2  : Up to 2 immediately following chronological turns from the full raw transcript (stops at >30s pauses)."],
+        ["  predicted_label  : SCIENCE_TALK / NOT_SCIENCE_TALK from the calibrated v3.1 pipeline (with ±2 cluster & USF trap veto)."],
         ["  review           : YOU fill this in -- pick SCIENCE_TALK or NOT_SCIENCE_TALK from the dropdown."],
-        ["  score            : Calibrated probability (0-1) that this utterance is science talk in context."],
+        ["  score            : Calibrated probability (0-1) after soft ±2 cluster & USF Stage-2 veto adjustment."],
+        ["  pm2_sci_count    : Number of science-leaning utterances (out of up to 5) in this turn's ±2 chronological window."],
         ["  scored_by        : 'hybrid_v3' (Stage 1 + Stage 2 LLM) or 'local_v3' (Stage 1 standalone)."],
         ["  cosine_score     : Stage 1 local conversation-sequence probability (0-1)."],
         ["  llm_score        : Stage 2 context-reading LLM score (0-1, when evaluated by Stage 2)."],
         ["  predicted_subtype: Science-talk conceptual route/subtype (content/observation/prediction/causal_reasoning/evidence)."],
-        ["  rationale        : Context-grounded justification under the Sept 2026 TeLI Coding Manual."],
+        ["  rationale        : Context-grounded justification under the Sept 2026 TeLI Coding Manual + USF exclusion rules."],
         [""],
         ["Note: Sheet names are pre-assigned deterministically across all files in the classroom folder"],
         ["to guarantee exact (classroom + sheet + line_no) alignment with raw transcripts."],

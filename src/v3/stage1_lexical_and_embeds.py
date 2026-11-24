@@ -38,6 +38,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.v3.codebook_v3 import clean_training_labels_for_usf
 from src.v3.embeddings import build_pause_bounded_context_matrix, load_unique_embeddings
 from src.v3.metrics import (
     apply_bcts,
@@ -54,7 +55,11 @@ torch.set_num_threads(min(10, max(4, torch.get_num_threads())))
 
 
 def get_codebook_feature_matrix(df: pd.DataFrame) -> np.ndarray:
-    cols = [c for c in df.columns if c.startswith("cb_")]
+    # Keep post-BCTS veto flags (`cb_trap_shape_only`, `cb_trap_count_only`, `cb_trap_look_no_content`)
+    # out of the linear/sequence feature matrix so masking dirty legacy TPs cannot cause degenerate
+    # -infinity weights on zero-positive columns! Those 3 columns power the USF Stage-2 veto layer.
+    _VETO_ONLY = {"cb_trap_shape_only", "cb_trap_count_only", "cb_trap_look_no_content"}
+    cols = [c for c in df.columns if c.startswith("cb_") and c not in _VETO_ONLY]
     arr = df[cols].to_numpy(dtype=np.float32)
     # Add timing & ASR features cleanly
     gp = np.log1p(np.clip(df["gap_prev_s"].fillna(0.0).to_numpy(dtype=np.float32), 0.0, 600.0))[:, None]
@@ -253,7 +258,7 @@ def run_lexical_models(
     t0 = time.time()
     n2, n1 = len(df_y2), len(df_y1)
     folds = df_y2["fold"].to_numpy()
-    labels = df_y2["label"].to_numpy()
+    labels = clean_training_labels_for_usf(df_y2)
     screened = df_y2["screened"].to_numpy(dtype=bool)
 
     cb_y2 = get_codebook_feature_matrix(df_y2)
@@ -462,7 +467,7 @@ def run_nomic_context_models(
     """Train 1B (nomic-embed-v1.5) contextual Linear & MLP models with fold-isolated inner-OOF CVIR."""
     n2, n1 = len(df_y2), len(df_y1)
     folds = df_y2["fold"].to_numpy()
-    labels = df_y2["label"].to_numpy()
+    labels = clean_training_labels_for_usf(df_y2)
     screened = df_y2["screened"].to_numpy(dtype=bool)
     cb_y2 = get_codebook_feature_matrix(df_y2)
     cb_y1 = get_codebook_feature_matrix(df_y1)
@@ -529,7 +534,7 @@ def run_sfr_context_models(
     """Train 1C (sfr-embedding-mistral 4096d + fused nomic+sfr) with inner-OOF 4096d probe & SVD."""
     n2, n1 = len(df_y2), len(df_y1)
     folds = df_y2["fold"].to_numpy()
-    labels = df_y2["label"].to_numpy()
+    labels = clean_training_labels_for_usf(df_y2)
     screened = df_y2["screened"].to_numpy(dtype=bool)
     cb_y2 = get_codebook_feature_matrix(df_y2)
     cb_y1 = get_codebook_feature_matrix(df_y1)
@@ -666,7 +671,7 @@ def run_fixed_biencoder(
     t0 = time.time()
     n2, n1 = len(df_y2), len(df_y1)
     folds = df_y2["fold"].to_numpy()
-    labels = df_y2["label"].to_numpy()
+    labels = clean_training_labels_for_usf(df_y2)
     screened = df_y2["screened"].to_numpy(dtype=bool)
     nomic_u, idx_map = load_unique_embeddings("nomic-embed-text-v1.5")
     uids_y2 = idx_map["y2"]

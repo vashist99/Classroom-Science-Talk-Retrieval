@@ -15,7 +15,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.v3.codebook_v3 import (
     MANUAL_V3_SLIDING_WINDOW_SYSTEM_PROMPT,
+    apply_usf_cluster_and_veto_rules,
+    clean_training_labels_for_usf,
     extract_codebook_features,
+    extract_pm2_context_columns,
     infer_subtype_rule,
 )
 from src.v3.dataset import assign_stratified_classroom_folds, parse_transcription, to_seconds
@@ -157,17 +160,17 @@ def test_metrics_bcts_emq_pacc():
 
 
 def test_hmm_smoother_boosts_episodes_and_preserves_isolated_bypass():
-    # Episode of high probs around index 5, isolated 0.92 spike at index 25
+    # Episode of high probs around index 5, isolated ultra-confident 0.96 spike at index 25
     probs = np.full(30, 0.03, dtype=np.float32)
     probs[4:9] = [0.75, 0.35, 0.85, 0.40, 0.80]
-    probs[25] = 0.92
+    probs[25] = 0.96
     gaps = np.full(30, 2.0, dtype=np.float64)
     gaps[15] = 120.0  # 2-minute pause separating episodes
     sm = hmm_forward_backward_transcript(probs, gaps)
     # Turn 5 inside science episode should be boosted relative to raw 0.35
     assert sm[5] > 0.35
-    # High-confidence standalone turn 25 preserved by bypass
-    assert sm[25] >= 0.92
+    # Ultra-confident standalone turn 25 preserved by bypass (>= 0.94)
+    assert sm[25] >= 0.95
 
 
 def test_stage2_windowing_and_json_parser():
@@ -323,8 +326,75 @@ def test_blinded_ht_audit_contains_no_model_scores_or_strata():
     p = PROJECT_ROOT / "reports" / "v3" / "unflagged_recall_audit_BLIND_coder_sheet.xlsx"
     if not p.exists():
         pytest.skip("Blinded HT audit sheet not yet exported")
-    df = pd.read_excel(p, sheet_name="BLIND_AUDIT", engine="openpyxl")
+    try:
+        df = pd.read_excel(p, sheet_name="BLIND_AUDIT", engine="openpyxl")
+    except PermissionError:
+        pytest.skip("Blinded HT audit sheet is currently open/locked in Excel")
     assert len(df) == 600
     forbidden = {"stratum", "stratum_N", "stratum_n", "ht_weight", "v3_hybrid_score", "v3_stage1_score", "v3_llm_rationale"}
     assert forbidden.isdisjoint(set(df.columns))
     assert {"audit_row_id", "context_before_6", "target_utterance", "context_after_6", "review_SCI_or_blank", "confidence_1_to_5"}.issubset(set(df.columns))
+
+
+def test_usf_exclusions_traps_and_content_protection():
+    # Pure shapes, pure counting, and look-without-content MUST fire strict USF traps
+    f_sh = extract_codebook_features("Aaron made a rectangle.", "adult")
+    assert f_sh["trap_shape_only"] == 1.0 and f_sh["has_content"] == 0.0
+
+    f_ct = extract_codebook_features("One, two, three, four.", "child")
+    assert f_ct["trap_count_only"] == 1.0 and f_ct["has_content"] == 0.0
+
+    f_lk = extract_codebook_features("Look closely! Does yours look like mine?", "adult")
+    assert f_lk["trap_look_no_content"] == 1.0
+    assert f_lk["p_obs"] == 0.0  # observation cue MUST be gated off when has_content == 0!
+
+    # Genuine science content words MUST NOT be falsely trapped!
+    f_pc = extract_codebook_features("Look at this pine cone.", "child")
+    assert f_pc["has_content"] == 1.0 and f_pc["trap_shape_only"] == 0.0 and f_pc["trap_look_no_content"] == 0.0
+
+    f_mn = extract_codebook_features("So how many moons do we have?", "adult")
+    assert f_mn["has_content"] == 1.0 and f_mn["trap_count_only"] == 0.0
+
+    f_an = extract_codebook_features("See, they still have a giraffe and grasshoppers.", "adult")
+    assert f_an["has_content"] == 1.0 and f_an["trap_look_no_content"] == 0.0
+
+
+def test_usf_pm2_cluster_veto_and_context_extraction():
+    rows = [
+        ("tx1", "adult", "What is the weather today?", 0.0, 0.90, 1),
+        ("tx1", "child", "Cloudy.", 1.5, 0.85, 1),
+        ("tx1", "adult", "Yes, dark rain clouds cover the sun.", 1.0, 0.92, 1),
+        ("tx1", "unknown", "Whoa!", 1.2, 0.30, -1),
+        ("tx1", "adult", "What shape is this? Circle.", 45.0, 0.95, 0),  # >30s pause + shape trap!
+        ("tx1", "adult", "Gravity pulls everything down.", 45.0, 0.95, 1),  # isolated standalone!
+    ]
+    df = pd.DataFrame(rows, columns=["transcript_id", "speaker", "utterance", "gap_prev_s", "asr_conf", "label"])
+    feats = pd.DataFrame([extract_codebook_features(u, s) for u, s in zip(df["utterance"], df["speaker"])])
+    for c in feats.columns:
+        df[f"cb_{c}"] = feats[c]
+
+    # 1. Context ±2 extraction respects >30s pauses & preserves unknown/low-conf chronological lines
+    cb2, ca2 = extract_pm2_context_columns(df, pause_cut_s=30.0)
+    assert "What is the weather today?" in cb2[1]
+    assert "dark rain clouds" in ca2[1]
+    assert "unknown (low-conf): Whoa!" in ca2[2]
+    assert "[>30s pause]" in cb2[4]
+    assert "[>30s pause]" in ca2[4]
+
+    # 2. ±2 cluster rule keeps >=3 cluster unchanged, penalizes isolated by -0.60 logit,
+    #    and Stage-2 LLM veto crushes LLM-rejected shape trap!
+    cal_p = np.array([0.40, 0.35, 0.50, 0.01, 0.08, 0.40], dtype=np.float64)
+    llm_s = np.array([0.90, 0.85, 0.92, 0.02, 0.05, 0.90], dtype=np.float64)
+    llm_e = np.array([True, True, True, False, True, True], dtype=bool)
+    adj, pm2_cnt = apply_usf_cluster_and_veto_rules(df, cal_p, llm_scores=llm_s, llm_eval=llm_e)
+    assert int(pm2_cnt[1]) == 3
+    assert adj[1] == pytest.approx(0.35, rel=1e-4)  # inside >=3 cluster -> untouched!
+    assert int(pm2_cnt[5]) == 1
+    assert adj[5] < 0.30 and adj[5] > 0.20  # isolated -0.60 logit penalty: sigmoid(logit(0.40)-0.60) ≈ 0.268!
+    assert adj[4] < 0.005  # LLM-rejected shape trap vetoed (-0.60 - 3.5 = -4.1 logit)!
+
+    # 3. clean_training_labels_for_usf masks dirty shape TP (-2) without mutating df["label"]
+    df.loc[4, "label"] = 1
+    cleaned = clean_training_labels_for_usf(df)
+    assert cleaned[4] == -2
+    assert df["label"].iloc[4] == 1  # original evaluation label strictly untouched!

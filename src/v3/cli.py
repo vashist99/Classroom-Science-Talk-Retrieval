@@ -26,13 +26,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.v3.codebook_v3 import infer_subtype_rule
+from src.v3.codebook_v3 import (
+    apply_usf_cluster_and_veto_rules,
+    clean_training_labels_for_usf,
+    extract_pm2_context_columns,
+    infer_subtype_rule,
+)
 from src.v3.export_workbooks import LABEL_NOT, LABEL_SCIENCE, write_human_coded_workbook
 from src.v3.metrics import (
     apply_bcts,
     emq_sld,
     oof_bcts_and_thresholds,
     pacc_estimate,
+    tune_threshold_f1,
+    tune_threshold_recall,
 )
 
 DATA_DIR = PROJECT_ROOT / "data" / "v3"
@@ -59,8 +66,10 @@ def export_verified_y2_workbooks(
         scored_by_tag = "hybrid_v3"
         raw_p = np.load(PREDS_DIR / f"{model_key}_y2_oof.npy").astype(np.float64)
         s2_txt = pd.read_parquet(S2_DIR / "full83_stage2_text.parquet")
+        s2_npz = np.load(S2_DIR / "full83_stage2_outputs.npz")
         llm_scores = (0.60 * s2_txt["llm1_score"].to_numpy(dtype=np.float64)
                       + 0.40 * s2_txt["llm2_score"].to_numpy(dtype=np.float64))
+        llm_eval = s2_npz["eval1_y2"].astype(bool)
         llm_rats = s2_txt["llm_rationale"].fillna("").astype(str).tolist()
         llm_subs = s2_txt["llm_subtype"].fillna("").astype(str).tolist()
     else:
@@ -68,10 +77,11 @@ def export_verified_y2_workbooks(
         scored_by_tag = "local_v3"
         raw_p = np.load(PREDS_DIR / f"{model_key}_y2_oof.npy").astype(np.float64)
         llm_scores = np.full(len(df_y2), np.nan)
+        llm_eval = None
         llm_rats = [""] * len(df_y2)
         llm_subs = [""] * len(df_y2)
 
-    # Canonical strictly fold-isolated full-transcript BCTS calibration + thresholds (zero leakage!)
+    # Canonical strictly fold-isolated full-transcript BCTS calibration (zero leakage!)
     df_y2 = df_y2.reset_index(drop=True)
     scr = df_y2["screened"].to_numpy(dtype=bool)
     folds = df_y2["fold"].to_numpy()
@@ -80,9 +90,34 @@ def export_verified_y2_workbooks(
     valid_all = scr & (labels != -2)
 
     full_res = oof_bcts_and_thresholds(raw_p, y_all, folds, valid_all, recall_targets=(0.90,))
-    cal_p = full_res["cal_oof"]
-    thr_stand_fold = full_res["thrs_f1"]
-    thr_screen_fold = full_res["thrs_rec"][0.90]
+    cal_p = full_res["cal_oof"]  # Unadjusted exact-intercept BCTS for unbiased classroom rates!
+
+    # Apply USF ±2 chronological cluster rule (-0.60 logit if <3 in ±2) & Stage-2 LLM veto (-3.5 on USF traps)
+    # strictly fold-isolated when tuning standalone/screening thresholds!
+    adj_p, pm2_cnt = apply_usf_cluster_and_veto_rules(
+        df_y2,
+        cal_p,
+        llm_scores=(llm_scores if engine == "hybrid" else None),
+        llm_eval=llm_eval,
+        support_thr=0.05,
+        min_cluster=3,
+        penalty_logit=0.60,
+        pause_cut_s=30.0,
+    )
+    # Tune standalone & screening thresholds strictly OOF on CLEAN USF labels (excluding the 85
+    # vetoed legacy shape/count/bare-look TPs so Screening R>=90% doesn't drag cutoff down to recapture traps!)
+    lb_usf = clean_training_labels_for_usf(df_y2)
+    valid_usf = scr & (lb_usf != -2)
+    y_usf = (lb_usf == 1).astype(int)
+    thr_stand_fold: dict[int, float] = {}
+    thr_screen_fold: dict[int, float] = {}
+    for f in range(5):
+        tr_v = valid_usf & (folds != f)
+        thr_stand_fold[f] = tune_threshold_f1(y_usf[tr_v], adj_p[tr_v])
+        thr_screen_fold[f] = tune_threshold_recall(y_usf[tr_v], adj_p[tr_v], 0.90)
+
+    # Extract pause-bounded chronological ±2 context strings from ALL turns (before screening filter!)
+    ctx_before_2, ctx_after_2 = extract_pm2_context_columns(df_y2, pause_cut_s=30.0)
 
     modes_to_run = ["screening", "standalone"] if mode == "both" else [mode]
     out_base = out_root or (REPORTS_V3 / f"workbooks_{engine}")
@@ -91,6 +126,8 @@ def export_verified_y2_workbooks(
         "model_key": model_key,
         "mean_thr_screening": round(float(np.mean(list(thr_screen_fold.values()))), 4),
         "mean_thr_standalone": round(float(np.mean(list(thr_stand_fold.values()))), 4),
+        "usf_pm2_penalty_logit": 0.60,
+        "usf_stage2_trap_veto": bool(engine == "hybrid"),
         "modes": {},
     }
 
@@ -106,7 +143,7 @@ def export_verified_y2_workbooks(
             recs = []
             all_files = sorted(g["source_file"].unique().tolist())
             for gi in g.index:
-                sc = float(cal_p[gi])
+                sc = float(adj_p[gi])
                 lbl = LABEL_SCIENCE if sc >= thr else LABEL_NOT
                 sub = llm_subs[gi] if llm_subs[gi] else infer_subtype_rule(str(df_y2["utterance"].iat[gi]))
                 recs.append({
@@ -116,11 +153,14 @@ def export_verified_y2_workbooks(
                     "seg_start": str(df_y2["seg_start"].iat[gi]),
                     "seg_end": str(df_y2["seg_end"].iat[gi]),
                     "speaker": str(df_y2["speaker"].iat[gi]),
+                    "context_before_2": ctx_before_2[gi],
                     "utterance": str(df_y2["utterance"].iat[gi]),
+                    "context_after_2": ctx_after_2[gi],
                     "confidence": None if pd.isna(df_y2["asr_conf"].iat[gi]) else round(float(df_y2["asr_conf"].iat[gi]), 3),
                     "predicted_label": lbl,
                     "review": None,
                     "score": round(sc, 4),
+                    "pm2_sci_count": int(pm2_cnt[gi]),
                     "scored_by": scored_by_tag,
                     "cosine_score": round(float(s1_p[gi]), 4),
                     "llm_score": None if np.isnan(llm_scores[gi]) else round(float(llm_scores[gi]), 4),
@@ -161,7 +201,7 @@ def export_verified_y2_workbooks(
         for room, g in df_y2[scr & (folds == f)].groupby("classroom"):
             idx = g.index.to_numpy()
             thr_s = thr_stand_fold[f]
-            cc_n = int((cal_p[idx] >= thr_s).sum())
+            cc_n = int((adj_p[idx] >= thr_s).sum())
             mp_rate = float(cal_p[idx].mean())
             emq_rate, _ = emq_sld(cal_p[idx], pi_tr)
             pacc_rate = pacc_estimate(cal_p[idx], tpr_s, fpr_s)
@@ -174,7 +214,7 @@ def export_verified_y2_workbooks(
                 "calibrated_mean_pct_primary": round(100.0 * mp_rate, 2),
                 "standalone_cc_n": cc_n,
                 "standalone_cc_pct": round(100.0 * cc_n / len(idx), 2),
-                "screening_r90_n": int((cal_p[idx] >= thr_screen_fold[f]).sum()),
+                "screening_r90_n": int((adj_p[idx] >= thr_screen_fold[f]).sum()),
                 "emq_diagnostic_pct": round(100.0 * emq_rate, 2),
                 "pacc_diagnostic_pct": round(100.0 * pacc_rate, 2),
             })

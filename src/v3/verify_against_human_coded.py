@@ -143,7 +143,7 @@ def _oof_calibrate_and_threshold(
 
 
 def verify_exported_workbook_schema(export_dir: Path) -> dict[str, Any]:
-    """Verify exported v3 Excel workbooks match exact 18-column `Human coded` schema + dropdowns."""
+    """Verify exported v3.1 Excel workbooks match exact 21-column `Human coded` + ±2 context schema + dropdowns."""
     import openpyxl
 
     files = sorted([p for p in export_dir.glob("*.xlsx") if not p.name.startswith("~$")])
@@ -170,7 +170,7 @@ def verify_exported_workbook_schema(export_dir: Path) -> dict[str, Any]:
         "export_dir": str(export_dir),
         "n_workbooks": len(files),
         "n_data_sheets_checked": checked,
-        "schema_18col_ok": len(bad_schema) == 0,
+        "schema_21col_ok": len(bad_schema) == 0,
         "instructions_sheet_ok": len(missing_instructions) == 0,
         "review_dropdown_ok": len(missing_dv) == 0,
         "bad_schema": bad_schema[:10],
@@ -184,11 +184,15 @@ def run_human_coded_verification(verbose: bool = True) -> dict[str, Any]:
     df_y2 = pd.read_parquet(DATA_DIR / "y2_utterances.parquet")
 
     hyb_raw = np.load(PREDS_DIR / "6A_hybrid_cascade_v3_y2_oof.npy").astype(np.float64)
+    hyb_usf_path = PREDS_DIR / "6A_hybrid_cascade_v3_usf_y2_oof.npy"
+    hyb_usf_raw = np.load(hyb_usf_path).astype(np.float64) if hyb_usf_path.exists() else hyb_raw
     loc_raw = np.load(PREDS_DIR / "6B_pgkd_distilled_local_v3_y2_oof.npy").astype(np.float64)
+    loc_usf_path = PREDS_DIR / "6B_pgkd_distilled_local_v3_usf_y2_oof.npy"
+    loc_usf_raw = np.load(loc_usf_path).astype(np.float64) if loc_usf_path.exists() else loc_raw
     s1_raw = np.load(PREDS_DIR / "4C_stage1_ensemble_y2_oof.npy").astype(np.float64)
 
-    hyb_cal, hyb_st, hyb_s90, thr_hyb_st, thr_hyb_s90 = _oof_calibrate_and_threshold(df_y2, hyb_raw)
-    loc_cal, loc_st, loc_s90, thr_loc_st, thr_loc_s90 = _oof_calibrate_and_threshold(df_y2, loc_raw)
+    hyb_cal, hyb_st, hyb_s90, thr_hyb_st, thr_hyb_s90 = _oof_calibrate_and_threshold(df_y2, hyb_usf_raw)
+    loc_cal, loc_st, loc_s90, thr_loc_st, thr_loc_s90 = _oof_calibrate_and_threshold(df_y2, loc_usf_raw)
     s1_cal, s1_st, s1_s90, _, _ = _oof_calibrate_and_threshold(df_y2, s1_raw)
 
     s2_txt = pd.read_parquet(S2_DIR / "full83_stage2_text.parquet") if (S2_DIR / "full83_stage2_text.parquet").exists() else None
